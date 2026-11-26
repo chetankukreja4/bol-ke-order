@@ -1,6 +1,11 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026. Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (after commit `d5bc63c`). Read this first if you are picking up the project.
+
+> **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
+> update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
+> 8 (limits) and the change log in section 12. The owner switches between AI accounts when one hits its
+> limit, so this file is the only memory that carries over. Write in plain English.
 
 ## 1. What this is
 
@@ -23,7 +28,7 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 
 | Item | Status |
 |---|---|
-| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 1,900 lines. Starts with no keys; missing keys show a "key not set" label. |
+| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 2,750 lines of app code + 300 lines of tests. Starts with no keys; a missing key shows a "key not set" label. |
 | 2. YouTube demo, 3 minutes or less | **To do.** Script idea in section 9. |
 | 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. |
 | 4. Live link (optional bonus) | **To do.** Deploy on Dostack Cloud. |
@@ -35,6 +40,7 @@ Before submitting: ask a friend to clone the repo and run `docker compose up --b
 ```
 Mic → Sarvam saaras:v4 (if key) or Web Speech hi-IN ──┐
 Upload m4a/ogg/mp3 → ffmpeg 25 s chunks → Sarvam STT ──┤
+Pasted call transcript → app/transcript.py clean-up ───┤
                                                        ▼
                                      transcript shown on screen
                                                        ▼
@@ -54,6 +60,13 @@ Main rules (from the spec):
 - Prices and discounts are never changed or stored.
 - Consent note on the upload screen.
 - Nothing is saved until confirm; the server checks again before saving.
+- The parchi never prints what the app heard; that text is shown on screen only, below the parchi.
+
+Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`):
+- **Order**: hold-to-speak mic, upload recording, paste call transcript, type, sample phrases; then Heard text → Check the order → Parchi.
+- **Orders**: all orders with All / Pending / Dispatched filter; tap one to see and print its parchi.
+- **Dispatch**: "Dispatch bolo" mic plus a "Waiting to go" list with one-tap mode buttons. The talk keeps context between turns (the browser sends back `order_ids` and `mode`), so "truck se" and "हां पक्का" continue it. Orders can be named by party ("ABC ka maal gaya") or number ("order 6", "6 number wala", "order 3, 4 aur 5 ek hi truck"). If speech joins numbers ("345") and no such order exists, it is split into open orders only when exactly one split fits (and matches "teeno"/"dono" if said). Everything is read back for "pakka".
+- **Items**: list, search, add, edit, remove items (code, name, unit, group, spoken names). Saved in SQLite; matching and Sarvam keyterms update at once.
 
 ## 5. Code map
 
@@ -63,14 +76,14 @@ Main rules (from the spec):
 | `app/textnorm.py` | Devanagari → Roman, spelling clean-up, spoken numbers (das, dus, ten, pachees, do sau, दस) |
 | `app/catalog.py` | 20 sample items (seed for the Items page) with Hinglish aliases, 7 parties, units, dispatch modes. `replace_items()` swaps the live item list |
 | `app/matcher.py` | RapidFuzz item and party matching, brand groups, picking an option from an answer |
-| `app/parser.py` | Rule-based extraction (no key needed), dates, confirm/correction words, dispatch parsing |
+| `app/parser.py` | Rule-based extraction (no key needed), dates, confirm/correction/cancel words, dispatch parsing: party, mode, order numbers (`find_order_numbers`), splitting joined numbers (`split_joined_number`) |
 | `app/dialog.py` | Draft order, read-back text, next question, applying answers and corrections, save checks |
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
 | `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
 | `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
-| `static/` | `index.html` (4 tabs: Order, Orders, Dispatch, Items), `app.js` (mic, TTS, pages, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones) |
-| `tests/test_orders.py` | 39 tests |
+| `static/` | `index.html` (4 tabs: Order, Orders, Dispatch, Items), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
+| `tests/test_orders.py` | 42 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -78,7 +91,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 39 tests (inside .venv or the container)
+pytest -q                          # 42 tests (inside .venv or the container)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -90,20 +103,24 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 39 tests pass (numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, dispatch, "key not set").
-- Full flow in a browser at phone size: sample phrase → brand question → correction → confirm → parchi → dispatch. Both light and dark themes.
+- 42 tests pass (numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
+- Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
+- In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
+- The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
 - ffmpeg chunking: a 70 s file becomes 3 chunks.
 - The server start command and health check work.
 
 Not checked yet:
 - **Docker build**: Docker is not installed on the dev PC. The Dockerfile is simple, but run it once before submitting.
-- **Real microphone**: the preview browser blocks the mic. Test in Chrome on a phone over HTTPS.
-- **Sarvam** with a real key: the request follows Sarvam's REST API docs (`/speech-to-text`, model `saaras:v4`, mode `translit`, `keyterms`, header `api-subscription-key`) but has never been called. With the key set, the live mic records and sends to Sarvam (a level meter detects when you stop); the header pill "Mic: Sarvam AI ⇄" switches back to the browser recogniser. Test one real order and one upload.
-- Real shop noise and accents: only typed and sample text tested so far.
+- **Phone microphone over HTTPS**: needs a deploy. The header pill "Mic: Sarvam AI ⇄" switches between Sarvam and the browser recogniser; the browser one writes Devanagari and mishears numbers and "truck" more often.
+- **A real Samsung call transcript**: the four formats tested were written by us. Paste one real copy to check.
+- **Upload of a real call recording** through Sarvam.
+- Real shop noise and accents.
 
 ## 8. Known limits and next steps
 
 - Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are still hard-coded sample data. Next: CSV import of the pilot shop's item list, and a Parties page.
+- Orders cannot be deleted from the app (test orders stay in `data/orders.db`; delete that file to start clean locally).
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
 - On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
 - No login, one shop only, no dues or payments module (kept out on purpose).
@@ -116,7 +133,7 @@ Not checked yet:
 2. 0:20–1:30 Phone, hold **Order bolo**: "ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena" → read-back → "Kaun sa soap brand?" → "Lux" → "nahi, aath carton" → "haan, pakka" → parchi + CSV.
 3. 1:30–2:00 Upload a WhatsApp voice note with small talk and bargaining; show that it is ignored.
 4. 2:00–2:20 Unknown item → top 3 options, yellow "Pakka nahi hoon".
-5. 2:20–2:40 Dispatch: "ABC ka maal gaya, rickshaw se".
+5. 2:20–2:40 Dispatch: "Order 3, 4 aur 5 ek hi truck mein gaye" → read-back → "haan pakka". Also show Paste call transcript and the Items page if time allows.
 6. 2:40–3:00 Pilot plan: 3 shops, 30 days, the three numbers we measure.
 
 ## 10. Pitch deck notes
@@ -130,3 +147,15 @@ Not checked yet:
 
 - GitHub: `chetankukreja4` (repo owner).
 - Hosting: Dostack Cloud (to be set up by Chetan). Keys go only in the host's secret settings.
+
+## 12. Change log (newest first)
+
+| Commit | What changed |
+|---|---|
+| `d5bc63c` | Dispatch keeps context between turns; Hindi "हां पक्का" works; find orders by number; several orders in one truck; split joined numbers like 345 |
+| `e33375e` | Parchi no longer prints the heard text; nicer dates |
+| `69e458d` | Four tabs (Order, Orders, Dispatch, Items); Items page backed by SQLite; Paste call transcript; Hindi title removed |
+| `afcf5db` | Live mic uses Sarvam `saaras:v4` (translit + keyterms) when the key is set; LLM (Claude) removed, Sarvam is the only paid service |
+| `24eeee3` | Handoff and deploy docs; container ready for the cloud |
+| `0160eb6` | Dark theme |
+| `1c7a054` | First version |

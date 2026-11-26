@@ -52,7 +52,38 @@ if ('speechSynthesis' in window) {
   const load = () => { voices = speechSynthesis.getVoices(); };
   load(); speechSynthesis.onvoiceschanged = load;
 }
-function speak(text) {
+// The app's voice: the server's local Hindi voice (Piper) when installed,
+// else the browser's own voice. Either way speak() resolves when it is done.
+let currentAudio = null;
+function stopSpeaking() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (currentAudio) { const a = currentAudio; currentAudio = null; a.pause(); a.dispatchEvent(new Event('ended')); }
+}
+async function speak(text) {
+  if (!text) return;
+  stopSpeaking();
+  if (state.cfg?.server_tts) {
+    try {
+      const r = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+      if (r.ok) {
+        const url = URL.createObjectURL(await r.blob());
+        const played = await new Promise((resolve) => {
+          const a = new Audio(url);
+          currentAudio = a;
+          let done = false;
+          const finish = (ok) => { if (done) return; done = true; URL.revokeObjectURL(url); if (currentAudio === a) currentAudio = null; resolve(ok); };
+          a.onended = () => finish(true);
+          a.onerror = () => finish(false);
+          setTimeout(() => finish(true), 30000); // never hang
+          a.play().catch(() => finish(false)); // e.g. the phone blocked autoplay
+        });
+        if (played) return;
+      }
+    } catch (_) { /* network: fall back to the browser voice */ }
+  }
+  return browserSpeak(text);
+}
+function browserSpeak(text) {
   return new Promise((resolve) => {
     if (!text || !('speechSynthesis' in window)) return resolve();
     speechSynthesis.cancel();
@@ -217,7 +248,7 @@ function startCapture({ onInterim, onAutoStop }) {
 function bindMic(btn, { onInterim, onResult }) {
   let ctl = null, t0 = 0, mode = null;
   const begin = (m) => {
-    window.speechSynthesis?.cancel();
+    stopSpeaking(); // pressing the mic stops the app talking
     ctl = startCapture({ onInterim, onAutoStop: finish });
     mode = m; ctl.autoStop = m === 'toggle';
     btn.classList.add('listening');

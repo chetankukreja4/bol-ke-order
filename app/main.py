@@ -1,4 +1,5 @@
 """Bol-ke-Order API + static frontend."""
+import asyncio
 import copy
 import csv
 import hashlib
@@ -30,7 +31,7 @@ def _load_dotenv(path=os.path.join(os.path.dirname(__file__), "..", ".env")):
 _load_dotenv()
 
 from fastapi import FastAPI, File, HTTPException, UploadFile  # noqa: E402
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -41,7 +42,7 @@ from .dialog import answer, build_draft, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
-from . import importer, pilot
+from . import importer, pilot, tts
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
 MAX_UPLOAD = 30 * 1024 * 1024
@@ -124,6 +125,7 @@ class ItemIn(BaseModel):
 def config():
     return {
         "server_stt": stt.stt_available(),
+        "server_tts": tts.available(),  # local Piper voice; otherwise the browser speaks
         "stt_message": None if stt.stt_available() else "Speech key not set (SARVAM_API_KEY). Live mic uses the browser; uploads are off.",
         "catalog": CATALOG, "parties": PARTIES, "test_phrases": TEST_PHRASES,
         "units": list(UNITS), "groups": [{"key": g, "label": GROUP_LABEL.get(g, g), "words": w}
@@ -484,6 +486,25 @@ def order_wrong_undo(order_id: int):
     if not o:
         raise HTTPException(404, "Order not found")
     return o
+
+
+class SpeakIn(BaseModel):
+    text: str
+
+
+@app.post("/api/speak")
+async def speak(body: SpeakIn):
+    """One line the app says, in the local Hindi voice (Piper). 503 when the
+    voice is not installed: the browser then uses its own voice."""
+    if not tts.available():
+        return JSONResponse({"error": "voice_not_installed"}, status_code=503)
+    if not tts.clean(body.text):
+        raise HTTPException(400, "Nothing to say")
+    try:
+        audio, kind = await asyncio.to_thread(tts.speak, body.text)
+    except Exception as e:  # a broken model must never break the order flow
+        return JSONResponse({"error": "tts", "message": str(e)[:200]}, status_code=502)
+    return Response(content=audio, media_type=kind, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/healthz")

@@ -233,7 +233,7 @@ function bindMic(btn, { onInterim, onResult }) {
 
 // ------------------------------------------------------------------ screens
 // Pages: Order (with its flow screens), Orders, Dispatch, Items. One per tab.
-const TABS = ['order', 'orders', 'dispatch', 'items'];
+const TABS = ['order', 'orders', 'dispatch', 'items', 'pilot'];
 function show(name) {
   let tab = 'order';
   document.querySelectorAll('.screen').forEach((sc) => {
@@ -250,6 +250,7 @@ function show(name) {
   window.scrollTo(0, 0);
   if (name === 'orders' || name === 'dispatch') loadOrders();
   if (name === 'items') loadItems();
+  if (name === 'pilot') loadPilot();
 }
 function route() {
   const tab = location.hash.replace('#', '');
@@ -260,6 +261,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 // ------------------------------------------------------------ order capture
 async function handleCaptured(res, source) {
+  state.source = 'mic';
   state.blob = res.blob || state.blob;
   state.blobName = res.blob ? res.blobName : state.blobName;
   if (res.source !== 'server' && !res.text && res.blob && micEngine() === 'record') return sendRecording(); // no browser speech: server does it
@@ -311,7 +313,9 @@ async function parseTranscript() {
   const text = $('trText').value.trim();
   if (!text) return toast('Pehle order bolein ya likhein');
   try {
-    const d = await post('/api/parse', { text, kind: state.textKind || null });
+    const d = await post('/api/parse', {
+      text, kind: state.textKind || null, source: state.source || 'typed', test: $('testOrder').checked,
+    });
     state.draft = d;
     if (d.notice === 'unclear') {
       if (state.textKind === 'transcript') return toast('Is transcript mein koi item nahi mila. Text check karein.', 4000);
@@ -396,6 +400,62 @@ function renderDone(viewOnly) {
   // What the app heard is for staff to check on screen only; it is not printed.
   $('dnHeard').innerHTML = o.heard_text ? `<b>App ne suna:</b> "${esc(o.heard_text)}"` : '';
   $('dnCsv').href = `/api/orders/${o.id}/csv`;
+  renderWrong();
+}
+
+// "Galat nikla": the saved order turned out wrong. Counted in the pilot numbers.
+const WRONG = { item: 'Item galat', qty: 'Quantity galat', party: 'Party galat', missing: 'Item chhoot gaya', other: 'Kuch aur' };
+function renderWrong(open) {
+  const o = state.order, box = $('dnWrong');
+  if (o.wrong_reason) {
+    box.innerHTML = `<div class="status bad">✗ Galat nikla: ${esc(WRONG[o.wrong_reason] || o.wrong_reason)}</div>`;
+    return;
+  }
+  if (!open) {
+    box.innerHTML = '<button class="btn btn-outline btn-sm" id="wrongOpen">✗ Galat nikla?</button>';
+    $('wrongOpen').onclick = () => renderWrong(true);
+    return;
+  }
+  box.innerHTML = `<div class="card small"><b>Kya galat tha?</b><div class="opts">${
+    Object.entries(WRONG).map(([k, v]) => `<button class="btn btn-outline btn-sm" data-r="${k}">${v}</button>`).join('')
+  }</div></div>`;
+  box.querySelectorAll('[data-r]').forEach((b) => b.onclick = async () => {
+    try {
+      state.order = await post(`/api/orders/${o.id}/wrong`, { reason: b.dataset.r });
+      renderWrong();
+      toast('Note ho gaya');
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message); }
+  });
+}
+
+// ------------------------------------------------------------------ pilot
+const fmtSec = (s) => (s === null || s === undefined ? '–' : s < 90 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`);
+const fmtPct = (p) => (p === null || p === undefined ? '–' : `${p}%`);
+async function loadPilot() {
+  let p;
+  try { p = await api('/api/pilot'); } catch (e) { $('pilotTiles').innerHTML = empty('Numbers nahi aaye. Network check karein.'); return; }
+  const tile = (big, label) => `<div class="stat"><b>${big}</b><span>${label}</span></div>`;
+  $('pilotTiles').innerHTML = [
+    tile(`${p.today} / ${p.orders}`, 'Orders (aaj / kul)'),
+    tile(fmtSec(p.median_seconds), 'Order pakka hone ka time (median)'),
+    tile(fmtSec(p.baseline_median), 'Pehle: parchi + Busy (median)'),
+    tile(fmtPct(p.pct_right_after_save), 'Save ke baad sahi nikle'),
+    tile(fmtPct(p.pct_no_questions), 'Bina sawaal ke pakke'),
+    tile(p.corrections_per_order ?? '–', 'Sudhaar per order'),
+  ].join('');
+  const src = Object.entries(p.by_source).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '–';
+  const wrong = Object.entries(p.wrong_by_reason).map(([k, v]) => `${esc(WRONG[k] || k)} ${v}`).join(' · ') || 'koi nahi';
+  $('pilotMore').innerHTML = `<div><b>Order kaise aaye:</b> ${src}</div><div><b>Galat nikle:</b> ${wrong}</div>
+    <div><b>Average time:</b> ${fmtSec(p.avg_seconds)} · <b>Pehle ke naap:</b> ${p.baseline_count}</div>`;
+  $('baseInput').value = (p.baseline || []).join(', ');
+}
+async function saveBaseline() {
+  const seconds = $('baseInput').value.split(/[,\s]+/).filter(Boolean).map(Number);
+  if (seconds.some((n) => !Number.isFinite(n))) return toast('Sirf numbers likhein, jaise 180, 240');
+  try {
+    await api('/api/pilot/baseline', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seconds }) });
+    toast('Save ho gaya'); loadPilot();
+  } catch (e) { toast(e.network ? 'Network nahi hai' : e.message); }
 }
 
 // --------------------------------------------------------------- dispatch
@@ -631,7 +691,7 @@ async function init() {
   $('pills').querySelector('[data-mic]')?.addEventListener('click', toggleMic);
   $('samples').innerHTML = (c.test_phrases || []).map((p, i) => `<button class="chip" data-i="${i}">${esc(p.text)}</button>`).join('');
   $('samplesCount').textContent = (c.test_phrases || []).length || '';
-  $('samples').querySelectorAll('.chip').forEach((b) => b.onclick = () => showTranscript(c.test_phrases[b.dataset.i].text, false));
+  $('samples').querySelectorAll('.chip').forEach((b) => b.onclick = () => { state.source = 'typed'; showTranscript(c.test_phrases[b.dataset.i].text, false); });
 
   bindMic($('micOrder'), { onInterim: (t) => ($('liveText').textContent = t), onResult: (r) => { $('liveText').textContent = ''; handleCaptured(r, 'mic'); } });
   answerMic = bindMic($('micAnswer'), { onInterim: (t) => ($('answerLive').textContent = t), onResult: (r) => {
@@ -643,9 +703,13 @@ async function init() {
   $('fileInput').onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
     state.blob = f; state.blobName = f.name; e.target.value = '';
+    state.source = 'upload';
     sendRecording();
   };
-  $('typedGo').onclick = () => showTranscript($('typed').value, false);
+  $('typedGo').onclick = () => { state.source = 'typed'; showTranscript($('typed').value, false); };
+  $('baseSave').onclick = saveBaseline;
+  try { $('testOrder').checked = localStorage.getItem('bko-test') === '1'; } catch (_) {}
+  $('testOrder').onchange = () => { try { localStorage.setItem('bko-test', $('testOrder').checked ? '1' : '0'); } catch (_) {} };
   $('trGo').onclick = parseTranscript;
   $('trText').addEventListener('focus', () => clearTimeout(state.autoTimer));
   $('trRetry').onclick = sendRecording;

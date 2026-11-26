@@ -101,7 +101,7 @@ def test_full_api_flow_and_dispatch():
     csv_text = client.get(f"/api/orders/{order['id']}/csv").text
     assert "SP01" in csv_text and "25" in csv_text
     disp = client.post("/api/dispatch/parse", json={"text": "Gupta ka maal gaya, rickshaw se"}).json()
-    assert disp["ok"] and disp["mode"] == "rickshaw" and disp["order"]["id"] == order["id"]
+    assert disp["ok"] and disp["mode"] == "rickshaw" and disp["orders"][0]["id"] == order["id"]
     done = client.post(f"/api/orders/{order['id']}/dispatch", json={"mode": "rickshaw"}).json()
     assert done["status"] == "dispatched" and done["dispatch_date"]
 
@@ -231,3 +231,77 @@ def test_pasted_transcript_other_formats():
     assert "98765" not in c["text"] and _lines(build_draft(c["text"])) == [(12, "packet", "MC01"), (2, "carton", "GH01")]
     # an ordinary spoken order is not treated as a transcript
     assert not looks_like_transcript("ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena")
+
+
+def _save(text):
+    d = client.post("/api/parse", json={"text": text}).json()
+    assert d["ready"], d["say"]
+    return client.post("/api/orders", json={"draft": d}).json()
+
+
+def test_dispatch_conversation_keeps_context_and_confirms_in_hindi():
+    o = _save("Jain bhai ko 8 carton Maggi aur 2 bag atta parso")
+    dp = lambda text, ctx=None: client.post("/api/dispatch/parse", json={"text": text, **(ctx or {})}).json()
+    # party, no mode -> asks how; "truck se" continues the same order (used to loop on "Kis party?")
+    r = dp("जैन ब्रदर्स का माल गया")
+    assert not r["ok"] and r["orders"][0]["id"] == o["id"] and "Kaise" in r["say"]
+    r = dp("truck se", {"order_ids": [o["id"]]})
+    assert r["ok"] and r["mode"] == "truck" and r["orders"][0]["id"] == o["id"]
+    # "हां पक्का" in Devanagari confirms (the browser used to miss it and start over)
+    r2 = dp("हां पक्का", {"order_ids": [o["id"]], "mode": "truck"})
+    assert r2["action"] == "confirm" and r2["orders"][0]["id"] == o["id"]
+    assert dp("nahi rehne do", {"order_ids": [o["id"]], "mode": "truck"})["action"] == "cancel"
+    # without context, "haan pakka" alone does not dispatch anything
+    assert not dp("haan pakka")["ok"]
+
+
+def test_dispatch_by_order_number():
+    a = _save("Bittu bhai ko 3 carton ghee kal")
+    b = _save("Bittu bhai ko 4 carton Maggi kal")
+    dp = lambda text: client.post("/api/dispatch/parse", json={"text": text}).json()
+    for said in (f"order {a['id']} truck se gaya", f"order number {a['id']} tempo se",
+                 f"{a['id']} number wala rickshaw se gaya", f"#{a['id']} auto"):
+        r = dp(said)
+        assert r["ok"] and [x["id"] for x in r["orders"]] == [a["id"]] and r["orders"][0]["party"] == "Bittu Store", said
+    # the party name alone still means the latest open order
+    assert dp("Bittu ka maal tempo se")["orders"][0]["id"] == b["id"]
+    # wrong party for that number, unknown number, already sent
+    assert "ka hai" in dp(f"Gupta ji ka order {a['id']} truck se")["say"]
+    assert "nahi mila" in dp("order 999 truck se")["say"]
+    client.post(f"/api/orders/{a['id']}/dispatch", json={"mode": "truck"})
+    assert "ja chuka" in dp(f"order {a['id']} truck se")["say"]
+
+
+def test_dispatch_several_orders_in_one_truck():
+    from app import db
+    from app.parser import find_order_numbers, split_joined_number
+    assert find_order_numbers("order 3, 4 aur 5 ek hi truck")["numbers"] == [3, 4, 5]  # "ek" is not order 1
+    assert find_order_numbers("ऑर्डर तीन चार और पांच ट्रक से")["numbers"] == [3, 4, 5]
+    assert find_order_numbers("ऑर्डर 345 तीनों एक ही ट्रक में") == {"numbers": [345], "count": 3}
+    assert split_joined_number(345, [3, 4, 5, 6], 3) == [[3, 4, 5]]
+    assert split_joined_number(1213, [1, 2, 3, 12, 13], 2) == [[12, 13]]
+
+    ids = [_save(t)["id"] for t in ("Gupta ji ko 2 carton ghee kal", "Jain bhai ko 3 carton Maggi kal",
+                                    "Bittu bhai ko 4 bori cheeni kal")]
+    open_ids = [o["id"] for o in db.list_orders(500) if o["status"] == "confirmed"]
+    dp = lambda text, ctx=None: client.post("/api/dispatch/parse", json={"text": text, **(ctx or {})}).json()
+    said = f"order {ids[0]}, {ids[1]} aur {ids[2]} teeno ek hi truck mein gaye"
+    r = dp(said)
+    assert r["ok"] and [o["id"] for o in r["orders"]] == ids and r["mode"] == "truck" and len(r["items"]) == 3
+    # the speech engine joined the numbers; split only when exactly one way fits
+    joined = int("".join(map(str, ids)))
+    ways = split_joined_number(joined, open_ids, 3)
+    r = dp(f"ऑर्डर {joined} तीनों एक ही ट्रक में")
+    if ways == [ids]:
+        assert r["ok"] and [o["id"] for o in r["orders"]] == ids
+    else:
+        assert not r["ok"]
+    # no mode yet: asks, then "tempo se" applies to all three, then "haan pakka"
+    r = dp(f"order {ids[0]} {ids[1]} aur {ids[2]}")
+    assert not r["ok"] and len(r["orders"]) == 3 and "Kaise" in r["say"]
+    r = dp("tempo se", {"order_ids": ids})
+    assert r["ok"] and r["mode"] == "tempo" and len(r["orders"]) == 3
+    r = dp("haan pakka", {"order_ids": ids, "mode": "tempo"})
+    assert r["action"] == "confirm" and [o["id"] for o in r["orders"]] == ids
+    # said "teeno" but only two numbers heard -> ask again
+    assert "number dobara" in dp(f"order {ids[0]} aur {ids[1]} teeno truck se")["say"]

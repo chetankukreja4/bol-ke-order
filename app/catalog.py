@@ -85,7 +85,7 @@ UNITS = {
 DISPATCH_MODES = {
     "rickshaw": ["rickshaw", "riksha", "rikshaw", "e rickshaw", "erickshaw"],
     "tempo": ["tempo", "chhota hathi", "chota hathi", "loader"],
-    "truck": ["truck", "trak", "gaadi"],
+    "truck": ["truck", "trak", "traik", "track", "trek", "gaadi"],
     "auto": ["auto"],
     "bike": ["bike", "scooty", "motorcycle"],
     "courier": ["courier", "kuriyar", "transport"],

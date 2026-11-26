@@ -403,38 +403,58 @@ async function handleDispatch(res) {
   const box = $('dispatchBox');
   box.classList.remove('hidden');
   if (!res.text) { box.textContent = 'Awaaz saaf nahi aayi, dobara bolein.'; return speak(box.textContent); }
-  if (state.dispatch?.ok && /pakka|haan|han|confirm|yes/i.test(res.text)) return doDispatch();
+  const prev = state.dispatch || {};
   try {
-    const r = await post('/api/dispatch/parse', { text: res.text });
+    // Send the order and mode we are already talking about, so "truck se" and "haan pakka" continue it.
+    const r = await post('/api/dispatch/parse', { text: res.text, order_ids: (prev.orders || []).map((o) => o.id), mode: prev.mode || null });
+    if (r.action === 'confirm') { state.dispatch = { ...r, ok: true }; return doDispatch(); }
+    if (r.action === 'cancel') {
+      state.dispatch = null;
+      box.innerHTML = `<div><i>Heard: "${esc(res.text)}"</i></div><p><b>${esc(r.say)}</b></p>`;
+      return speak(r.say);
+    }
     state.dispatch = r;
     let html = `<div><i>Heard: "${esc(res.text)}"</i></div><p><b>${esc(r.say)}</b></p>`;
     if (r.ok) {
-      html += `<div>${esc(r.items)}</div><div class="actions"><button class="btn" id="dsYes">✔ Haan, pakka</button><button class="btn btn-outline" id="dsNo">Cancel</button></div>`;
-    } else if (r.order) {
-      html += `<div class="opts">${['rickshaw', 'tempo', 'truck', 'auto', 'self pickup'].map((m) => `<button class="btn btn-outline" data-mode="${m}">${m}</button>`).join('')}</div>`;
+      html += `<ul class="ds-items">${r.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ul><div class="actions"><button class="btn" id="dsYes">✔ Haan, pakka</button><button class="btn btn-outline" id="dsNo">Cancel</button></div>`;
+    } else if (r.orders?.length) {
+      html += `<div class="opts">${MODES.map((m) => `<button class="btn btn-outline" data-mode="${m}">${m}</button>`).join('')}</div>`;
+    } else if (r.options) {
+      html += `<div class="opts">${r.options.map((o) => `<button class="btn btn-outline" data-party="${esc(o.name)}">${esc(o.name)}</button>`).join('')}</div>`;
     }
     box.innerHTML = html;
     box.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => { state.dispatch = { ...r, ok: true, mode: b.dataset.mode }; doDispatch(); });
+    box.querySelectorAll('[data-party]').forEach((b) => b.onclick = () => handleDispatch({ text: `${b.dataset.party} ${r.mode || ''}` }));
     if (r.ok) {
       $('dsYes').onclick = doDispatch;
       $('dsNo').onclick = () => { state.dispatch = null; box.classList.add('hidden'); };
     }
     await speak(r.say);
-    if (r.ok && micAvailable()) dispatchMic.listen();
+    if ((r.ok || r.orders?.length || r.options) && micAvailable() && $('screen-dispatch').classList.contains('active')) dispatchMic.listen();
   } catch (e) { toast(e.network ? 'Network nahi hai, dobara bolein' : e.message); }
 }
 
 async function doDispatch() {
   const r = state.dispatch;
-  if (!r?.order) return;
+  if (!r?.orders?.length) return;
+  const box = $('dispatchBox');
+  box.classList.remove('hidden');
+  const sent = [];
   try {
-    const o = await post(`/api/orders/${r.order.id}/dispatch`, { mode: r.mode });
-    $('dispatchBox').classList.remove('hidden');
-    $('dispatchBox').innerHTML = `<b>✔ Order #${o.id} dispatched by ${esc(o.dispatch_mode)} on ${esc(o.dispatch_date)}.</b>`;
-    speak(`Order ${o.id} dispatch ho gaya.`);
-    state.dispatch = null;
-    loadOrders();
-  } catch (e) { toast(e.message); }
+    for (const ord of r.orders) { // one truck can carry several orders
+      sent.push(await post(`/api/orders/${ord.id}/dispatch`, { mode: r.mode }));
+    }
+  } catch (e) {
+    toast(e.network ? 'Network nahi hai, dobara dabayein' : e.message);
+  }
+  if (sent.length) {
+    const ids = sent.map((o) => `#${o.id}`).join(', ');
+    box.innerHTML = `<b>✔ Order ${esc(ids)} dispatched by ${esc(sent[0].dispatch_mode)} on ${esc(sent[0].dispatch_date)}.</b>`;
+    speak(sent.length > 1 ? `${sent.length} order dispatch ho gaye.` : `Order ${sent[0].id} dispatch ho gaya.`);
+    // keep any that failed, so "Haan pakka" again retries only those
+    state.dispatch = sent.length < r.orders.length ? { ...r, orders: r.orders.slice(sent.length) } : null;
+  }
+  loadOrders();
 }
 
 // ------------------------------------------------------------------ theme
@@ -494,7 +514,7 @@ function renderPending() {
     : empty(state.orders ? 'All orders have gone out. 🎉' : 'Could not load orders (offline?).');
   box.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => {
     const order = state.orders.find((o) => String(o.id) === b.dataset.id);
-    state.dispatch = { ok: true, order, mode: b.dataset.mode };
+    state.dispatch = { ok: true, orders: [order], mode: b.dataset.mode };
     doDispatch();
   });
 }

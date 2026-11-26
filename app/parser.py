@@ -158,6 +158,84 @@ def is_correction(text: str) -> bool:
     return bool(toks) and toks[0] in {norm(w) for w in ["nahi", "nahin", "nai", "no", "galat", "nope", "na"]}
 
 
+_ORDER_WORDS = {norm(w) for w in ["order", "ordar", "ardar", "aardar", "odar", "orderno", "parchi", "bill"]}
+_NUMBER_WORDS = {norm(w) for w in ["number", "nambar", "nanbar", "numbar", "no", "num", "kramank"]}
+_CANCEL_WORDS = {norm(w) for w in ["cancel", "kainsal", "kensal", "rehne do", "chhodo", "ruko", "mat bhejo"]}
+
+
+_JOIN_WORDS = {norm(w) for w in ["aur", "or", "and", "ar", "va", "tatha", "bhi", "comma"]}
+_COUNT_WORDS = {norm("dono"): 2, norm("donon"): 2, norm("teeno"): 3, norm("tinon"): 3, norm("tino"): 3,
+                norm("charon"): 4, norm("charo"): 4, norm("paancho"): 5, norm("panchon"): 5}
+
+
+def _numbers_from(toks, j):
+    """Read '3 4 aur 5' starting at toks[j]. Small number words ("ek", "do")
+    only count right after a joining word, so "5 ek hi truck" stops at 5."""
+    out, after_join = [], True
+    while j < len(toks):
+        t = toks[j]
+        if t in _JOIN_WORDS:
+            after_join, j = True, j + 1
+            continue
+        if t in _NUMBER_WORDS:
+            j += 1
+            continue
+        if not after_join and not t.isdigit() and t in WEAK_NUMBER_WORDS:
+            break
+        v, used = parse_number_at(toks, j)
+        if not isinstance(v, int) or v <= 0:
+            break
+        out.append(v)
+        after_join, j = False, j + used
+    return out
+
+
+def find_order_numbers(text: str):
+    """'order 3, 4 aur 5 teeno' -> {"numbers": [3, 4, 5], "count": 3}.
+    '6 number wala' -> [6]. No order number -> numbers == []."""
+    toks = norm(text.replace("#", " number ").replace(",", " aur ")).split()
+    count = next((_COUNT_WORDS[t] for t in toks if t in _COUNT_WORDS), None)
+    for i, t in enumerate(toks):
+        if t in _ORDER_WORDS or t in _NUMBER_WORDS:
+            nums = _numbers_from(toks, i + 1)
+            if nums:
+                return {"numbers": list(dict.fromkeys(nums)), "count": count}
+        if t in _NUMBER_WORDS and i > 0:  # "6 number wala"
+            v, _ = parse_number_at(toks, i - 1)
+            if isinstance(v, int) and v > 0:
+                return {"numbers": [v], "count": count}
+    return {"numbers": [], "count": count}
+
+
+def find_order_number(text: str):
+    nums = find_order_numbers(text)["numbers"]
+    return nums[0] if nums else None
+
+
+def split_joined_number(n: int, open_ids, count=None):
+    """Speech-to-text often joins "3, 4, 5" into 345. Return the ways to cut the
+    digits into open order ids (each order once), keeping only `count` parts if known."""
+    digits, ids, found = str(n), {str(i) for i in open_ids}, []
+
+    def walk(rest, parts):
+        if not rest:
+            if len(parts) > 1 and (count is None or len(parts) == count):
+                found.append([int(p) for p in parts])
+            return
+        for k in range(1, len(rest) + 1):
+            head = rest[:k]
+            if head in ids and head not in parts:
+                walk(rest[k:], parts + [head])
+
+    walk(digits, [])
+    return found
+
+
+def is_cancel(text: str) -> bool:
+    t = f" {norm(text)} "
+    return is_correction(text) or any(f" {w} " in t for w in _CANCEL_WORDS)
+
+
 def parse_dispatch(text: str):
     """'ABC ka maal gaya, rickshaw se' -> party + mode."""
     party_res, _ = find_party(text)
@@ -167,4 +245,5 @@ def parse_dispatch(text: str):
         if any(f" {norm(w)} " in t for w in words):
             mode = m
             break
-    return {"party": party_res, "mode": mode}
+    nums = find_order_numbers(text)
+    return {"party": party_res, "mode": mode, "order_nos": nums["numbers"], "count": nums["count"]}

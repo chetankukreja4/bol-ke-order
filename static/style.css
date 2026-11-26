@@ -184,3 +184,5 @@ button.row-card:hover { border-color: var(--green); }
 }
 .heard-note { font-size: 14px; color: var(--muted); margin: 10px 2px 0; }
 .heard-note:empty { display: none; }
+.ds-items { margin: 4px 0 0; padding-left: 18px; font-size: 15px; }
+.ds-items li { margin: 2px 0; }

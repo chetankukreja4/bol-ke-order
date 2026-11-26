@@ -33,7 +33,7 @@ from . import db, stt
 from . import catalog
 from .catalog import CATALOG, GROUP_LABEL, GROUP_WORDS, PARTIES, UNITS
 from .dialog import answer, build_draft, validate_for_save
-from .parser import parse_dispatch
+from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
 
@@ -43,6 +43,12 @@ ALLOWED = (".m4a", ".ogg", ".oga", ".opus", ".mp3", ".wav", ".webm", ".aac", ".m
 
 app = FastAPI(title="Bol-ke-Order")
 catalog.replace_items(db.list_items())  # the shop's own item list from SQLite
+
+
+class DispatchTextIn(BaseModel):
+    text: str
+    order_ids: list[int] = []  # the orders being discussed, from the previous turn
+    mode: str | None = None
 
 
 class TextIn(BaseModel):
@@ -221,24 +227,75 @@ def all_csv():
                              headers={"Content-Disposition": 'attachment; filename="orders-review.csv"'})
 
 
+def _orders_say(orders):
+    if len(orders) == 1:
+        return f"{orders[0]['party']} order {orders[0]['id']}"
+    parties = list(dict.fromkeys(o["party"] for o in orders))
+    ids = ", ".join(str(o["id"]) for o in orders[:-1]) + f" aur {orders[-1]['id']}"
+    return f"Order {ids} ({', '.join(parties)})"
+
+
 @app.post("/api/dispatch/parse")
-def dispatch_parse(body: TextIn):
-    res = parse_dispatch(body.text)
-    p = res["party"]
-    if p["status"] == "choose":
+def dispatch_parse(body: DispatchTextIn):
+    """One turn of the dispatch talk. The browser sends back the orders and mode
+    from the previous turn, so "truck se" or "haan pakka" continue it.
+    Several orders can go together: "order 3, 4 aur 5 ek hi truck mein"."""
+    text = body.text.strip()
+    ctx = [o for o in (db.get_order(i) for i in body.order_ids) if o and o["status"] == "confirmed"]
+    ctx_mode = body.mode if ctx else None
+
+    if ctx and ctx_mode and is_confirm(text):
+        return {"ok": True, "action": "confirm", "orders": ctx, "mode": ctx_mode, "say": ""}
+    res = parse_dispatch(text)
+    if ctx and is_cancel(text) and not res["mode"]:
+        return {"ok": False, "action": "cancel", "say": "Theek hai, cancel."}
+
+    orders, p = [], res["party"]
+    if res["order_nos"]:
+        open_ids = [o["id"] for o in db.list_orders(500) if o["status"] == "confirmed"]
+        nos = res["order_nos"]
+        if len(nos) == 1 and not db.get_order(nos[0]):
+            # "3, 4, 5" heard as "345": cut it into open orders, then read it back for "pakka"
+            ways = split_joined_number(nos[0], open_ids, res["count"])
+            if len(ways) == 1:
+                nos = ways[0]
+            elif ways:
+                opts = " ya ".join(", ".join(map(str, w)) for w in ways[:3])
+                return {"ok": False, "say": f"Order {nos[0]} nahi mila. Kya matlab {opts}? Order number alag alag bolein."}
+        for n in nos:
+            o = db.get_order(n)
+            if not o:
+                return {"ok": False, "say": f"Order {n} nahi mila. Dobara bolein."}
+            if o["status"] != "confirmed":
+                return {"ok": False, "say": f"Order {o['id']} pehle hi {o['dispatch_mode'] or ''} se ja chuka hai."}
+            if p["status"] == "ok" and p["party"]["code"] != o["party_code"]:
+                return {"ok": False, "say": f"Order {o['id']} {o['party']} ka hai, {p['party']['name']} ka nahi. Dobara bolein."}
+            orders.append(o)
+        if res["count"] and res["count"] != len(orders):
+            return {"ok": False, "say": f"Aapne {res['count']} order kahe, par {len(orders)} number sune. Order number dobara bolein."}
+    elif p["status"] == "ok":
+        o = db.latest_open_order(p["party"]["code"])
+        if not o:
+            return {"ok": False, "say": f"{p['party']['name']} ka koi khula order nahi hai."}
+        orders = [o]
+    elif p["status"] == "choose":
         names = " ya ".join(o["name"] for o in p["options"])
-        return {"ok": False, "say": f"Kaun sa party? {names}?", "options": p["options"], "mode": res["mode"]}
-    if p["status"] != "ok":
-        return {"ok": False, "say": "Kis party ka maal gaya? Dobara bolein."}
-    order = db.latest_open_order(p["party"]["code"])
-    if not order:
-        return {"ok": False, "say": f"{p['party']['name']} ka koi khula order nahi hai."}
-    if not res["mode"]:
-        return {"ok": False, "say": "Kaise bheja? Rickshaw, tempo ya truck?", "order": order}
-    items = ", ".join(f"{ln['qty']} {ln['unit']} {ln['name']}" for ln in order["lines"][:3])
-    return {"ok": True, "order": order, "mode": res["mode"],
-            "say": f"{p['party']['name']} order {order['id']}, {res['mode']} se gaya. Pakka?",
-            "items": items}
+        return {"ok": False, "say": f"Kaun sa party? {names}? Ya order number bolein.", "options": p["options"],
+                "mode": res["mode"] or ctx_mode, "orders": ctx}
+    elif ctx:
+        orders = ctx  # "truck se" after we asked how it went
+    else:
+        return {"ok": False, "say": "Kis party ka maal gaya? Party ka naam ya order number bolein."}
+
+    same = ctx and [o["id"] for o in orders] == [o["id"] for o in ctx]
+    mode = res["mode"] or (ctx_mode if same else None)
+    who = _orders_say(orders)
+    if not mode:
+        return {"ok": False, "orders": orders, "say": f"{who}. Kaise bheja? Rickshaw, tempo ya truck?"}
+    items = [f"#{o['id']} {o['party']}: " + ", ".join(f"{ln['qty']} {ln['unit']} {ln['name']}" for ln in o["lines"][:3])
+             for o in orders]
+    return {"ok": True, "orders": orders, "mode": mode, "items": items,
+            "say": f"{who}, {mode} se gaya. Pakka?"}
 
 
 @app.post("/api/orders/{order_id}/dispatch")

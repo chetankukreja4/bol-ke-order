@@ -21,7 +21,12 @@ ITEM_COLS = {
     "group": ["group", "item group", "parent group", "under"],
     "aliases": ["aliases", "spoken names", "alias", "print name"],
 }
-CODE_RE = re.compile(r"[A-Z0-9_-]{1,12}")
+PARTY_COLS = {
+    "name": ["name", "account name", "party name", "particulars"],
+    "group": ["group", "parent group", "under"],
+    "aliases": ["aliases", "alias", "print name"],
+}
+CODE_RE =re.compile(r"[A-Z0-9_-]{1,12}")
 
 
 class ImportProblem(Exception):
@@ -139,3 +144,30 @@ def to_items(rows):
             "aliases": _aliases(name, [row.get(c, "") for c in ITEM_COLS["aliases"]]),
         })
     return items, skipped
+
+
+def to_parties(rows):
+    """Busy account rows -> (parties, skipped). A Busy account list also has
+    banks, expenses and suppliers: when it has a group column with
+    "Sundry Debtors", only those rows (customers) are kept."""
+    has_group = any(_pick(r, PARTY_COLS["group"]) for r in rows)
+    debtors_only = has_group and any("debtor" in _key(_pick(r, PARTY_COLS["group"])) for r in rows)
+    parties, skipped, names = [], [], set()
+    for n, row in enumerate(rows, 1):
+        name = _pick(row, PARTY_COLS["name"])
+        if not name or len(name) > 80:
+            skipped.append({"row": n, "name": name, "reason": "naam nahi"})
+            continue
+        if debtors_only and "debtor" not in _key(_pick(row, PARTY_COLS["group"])):
+            skipped.append({"row": n, "name": name, "reason": "customer nahi"})
+            continue
+        if name.lower() in names:
+            skipped.append({"row": n, "name": name, "reason": "dobara aaya"})
+            continue
+        names.add(name.lower())
+        first_two = " ".join(name.split()[:2])
+        parties.append({
+            "code": f"P{len(parties) + 1:03d}", "name": name,
+            "aliases": _aliases(name, [first_two] + [row.get(c, "") for c in PARTY_COLS["aliases"]]),
+        })
+    return parties, skipped

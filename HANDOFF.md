@@ -123,7 +123,7 @@ Not checked yet:
 ## 8. Known limits and next steps
 
 - **Next (approved 27 Nov, branch `pilot-ready`):** shop-ready + pilot numbers before 30 Nov. Busy export import for items and parties, parties moved to SQLite, numbers saved with every order (time to confirm, questions, corrections, "Galat nikla"), a Pilot tab with CSV, then deploy and test in the shop. Design: `docs/superpowers/specs/2026-11-27-pilot-ready-design.md`. Why: the Round 2 masterclass (VC speaker) stressed real-user testing in person and before/after numbers; no rubric was published.
-- Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are still hard-coded sample data. Next: CSV import of the pilot shop's item list, and a Parties page.
+- Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are now in SQLite (seeded from the 7 samples) and both lists can be replaced from a Busy export.
 - Orders cannot be deleted from the app (test orders stay in `data/orders.db`; delete that file to start clean locally).
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
 - On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
@@ -156,6 +156,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| party import (branch `pilot-ready`) | Parties in SQLite (`parties` table); `GET /api/parties`, `POST /api/parties/import` (only Sundry Debtors when the file has groups). "Which Sharma?" words are worked out from the list (`catalog.ambiguous_words`), so imported parties ask too |
 | item import (branch `pilot-ready`) | `POST /api/items/import` (preview; `?commit=1` replaces the item list). Needs `openpyxl` (added to requirements) |
 | pilot tab (branch `pilot-ready`) | Pilot tab (numbers, baseline stopwatch times, CSV); "Galat nikla" on a saved parchi; "Practice order" tick on the Order page; the app sends mic/upload/transcript/typed. Checked in the browser on a scratch DB: 3 orders, one marked wrong, phone size, dark theme |
 | pilot numbers saved (branch `pilot-ready`) | Orders save `stats` + `seconds_to_confirm` (old DBs get the new columns automatically); `POST /api/orders/{id}/wrong` (Galat nikla); `GET /api/pilot`, `/api/pilot.csv`, `PUT /api/pilot/baseline` |

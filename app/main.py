@@ -45,6 +45,7 @@ ALLOWED = (".m4a", ".ogg", ".oga", ".opus", ".mp3", ".wav", ".webm", ".aac", ".m
 
 app = FastAPI(title="Bol-ke-Order")
 catalog.replace_items(db.list_items())  # the shop's own item list from SQLite
+catalog.replace_parties(db.list_parties())  # and its parties
 
 
 class DispatchTextIn(BaseModel):
@@ -195,6 +196,22 @@ async def items_import(file: UploadFile = File(...), commit: int = 0):
         db.replace_items(items)
         catalog.replace_items(db.list_items())
     return _import_reply(rows, items, skipped, done)
+
+
+@app.get("/api/parties")
+def parties_list():
+    return db.list_parties()
+
+
+@app.post("/api/parties/import")
+async def parties_import(file: UploadFile = File(...), commit: int = 0):
+    """Busy account list (customers). Without commit=1 it only shows what would be loaded."""
+    rows, parties, skipped = await _read_import(file, importer.to_parties)
+    done = bool(commit) and bool(parties)
+    if done:
+        db.replace_parties(parties)
+        catalog.replace_parties(db.list_parties())
+    return _import_reply(rows, parties, skipped, done)
 
 
 @app.delete("/api/items/{code}")

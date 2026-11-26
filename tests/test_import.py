@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import catalog, db
-from app.importer import ImportProblem, read_table, to_items
+from app.importer import ImportProblem, read_table, to_items, to_parties
 from app.main import app
 
 client = TestClient(app)
@@ -24,6 +24,8 @@ def restore_samples():
     yield
     db.replace_items([dict(i, aliases=list(i["aliases"])) for i in catalog.SAMPLE_ITEMS])
     catalog.replace_items(db.list_items())
+    db.replace_parties([dict(p, aliases=list(p["aliases"])) for p in catalog.SAMPLE_PARTIES])
+    catalog.replace_parties(db.list_parties())
 
 
 def _xlsx(rows):
@@ -79,3 +81,43 @@ def test_import_endpoint_preview_then_commit_changes_matching():
     d = client.post("/api/parse", json={"text": "ABC ko 5 packet kurkure masala kal"}).json()
     assert d["lines"][0]["item"]["name"] == "Kurkure Masala"
     assert client.post("/api/items/import", files={"file": ("a.xls", b"x", "application/vnd.ms-excel")}).status_code == 400
+
+
+def test_seed_parties_still_ask_which_sharma():
+    d = client.post("/api/parse", json={"text": "Sharma ji ko 10 carton Lux kal"}).json()
+    assert d["party"]["status"] == "choose" and len(d["party"]["options"]) == 2
+
+
+def test_ambiguous_words_from_shared_first_word():
+    amb = catalog.ambiguous_words([
+        {"code": "P1", "name": "Verma Kirana Store", "aliases": []},
+        {"code": "P2", "name": "Verma Brothers", "aliases": []},
+        {"code": "P3", "name": "New Punjab Stores", "aliases": []},
+        {"code": "P4", "name": "New Delhi Traders", "aliases": []},
+    ])
+    assert amb["verma"] == ["P1", "P2"] and amb["verma ji"] == ["P1", "P2"]
+    assert "new" not in amb
+
+
+def test_busy_account_list_keeps_only_debtors_and_asks_which_one():
+    data = _xlsx([["Name", "Group"],
+                  ["Verma Kirana Store", "Sundry Debtors"], ["Verma Brothers", "Sundry Debtors"],
+                  ["HDFC Bank", "Bank Accounts"], ["Rent", "Indirect Expenses"]])
+    parties, skipped = to_parties(read_table("acc.xlsx", data))
+    assert [p["name"] for p in parties] == ["Verma Kirana Store", "Verma Brothers"]
+    assert parties[0]["code"] == "P001" and "verma kirana" in parties[0]["aliases"]
+    assert {s["reason"] for s in skipped} == {"customer nahi"}
+    r = client.post("/api/parties/import?commit=1", files={"file": ("acc.xlsx", data, "application/octet-stream")})
+    assert r.json()["committed"] is True and [p["name"] for p in client.get("/api/parties").json()] == [
+        "Verma Kirana Store", "Verma Brothers"]
+    d = client.post("/api/parse", json={"text": "Verma ko 10 carton Lux kal"}).json()
+    assert d["party"]["status"] == "choose"
+    d = client.post("/api/parse", json={"text": "Verma Brothers ko 10 carton Lux kal"}).json()
+    assert d["party"]["party"]["name"] == "Verma Brothers"
+    d = client.post("/api/parse", json={"text": "ABC wale ko 10 carton Lux kal"}).json()
+    assert d["party"]["status"] != "ok"  # old sample parties are gone
+
+
+def test_party_list_without_group_column_keeps_all():
+    parties, skipped = to_parties(read_table("p.csv", b"Party Name\nBansal Store\nKhanna Traders\n"))
+    assert [p["name"] for p in parties] == ["Bansal Store", "Khanna Traders"] and skipped == []

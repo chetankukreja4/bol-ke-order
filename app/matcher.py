@@ -8,7 +8,7 @@ Rules (all in plain code):
 from rapidfuzz import fuzz
 
 from .catalog import (AMBIGUOUS_PARTY_WORDS, CATALOG, GROUP_LABEL, GROUP_WORDS,
-                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change)
+                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change, on_parties_change)
 from .textnorm import norm
 
 STRONG = 88
@@ -24,7 +24,20 @@ def rebuild_item_index():
 
 
 rebuild_item_index()
-_PARTY_INDEX = [(norm(a), p["code"]) for p in PARTIES for a in p["aliases"] + [p["name"]]]
+_PARTY_INDEX = []
+_PARTY_INDEX_SET = {}  # exact phrase -> party, except phrases that could mean two parties
+
+
+@on_parties_change
+def rebuild_party_index():
+    _PARTY_INDEX[:] = [(norm(a), p["code"]) for p in PARTIES for a in p["aliases"] + [p["name"]] if norm(a)]
+    _PARTY_INDEX_SET.clear()
+    for alias, code in _PARTY_INDEX:
+        if alias not in AMBIGUOUS_PARTY_WORDS:
+            _PARTY_INDEX_SET[alias] = code
+
+
+rebuild_party_index()
 _GROUP_INDEX = {norm(w): g for g, words in GROUP_WORDS.items() for w in words}
 
 
@@ -133,10 +146,6 @@ def find_party(text: str):
     return {"status": "missing", "party": None, "options": []}, None
 
 
-_PARTY_INDEX_SET = {}
-for _alias, _code in _PARTY_INDEX:
-    if _alias not in AMBIGUOUS_PARTY_WORDS:
-        _PARTY_INDEX_SET[_alias] = _code
 
 
 def choose_from(text: str, options, kind="item"):

@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS items (
     aliases TEXT NOT NULL,        -- JSON list of spoken names
     pos INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS parties (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    aliases TEXT NOT NULL,        -- JSON list of spoken names
+    pos INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
@@ -179,6 +185,31 @@ def replace_items(items):
             c.execute("INSERT INTO items (code, name, unit, grp, aliases, pos) VALUES (?,?,?,?,?,?)",
                       (it["code"], it["name"], it["unit"], it["group"], json.dumps(it["aliases"]), n))
         c.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('items_seeded', '1')")
+
+
+# ----------------------------------------------------------------- parties
+def list_parties():
+    """All parties. Seeds the sample parties the first time the database is used."""
+    from .catalog import SAMPLE_PARTIES
+    with _conn() as c:
+        if not c.execute("SELECT 1 FROM meta WHERE k='parties_seeded'").fetchone():
+            _insert_parties(c, SAMPLE_PARTIES)
+        return [{"code": r["code"], "name": r["name"], "aliases": json.loads(r["aliases"])}
+                for r in c.execute("SELECT * FROM parties ORDER BY pos, code")]
+
+
+def _insert_parties(c, parties):
+    for n, p in enumerate(parties):
+        c.execute("INSERT OR IGNORE INTO parties (code, name, aliases, pos) VALUES (?,?,?,?)",
+                  (p["code"], p["name"], json.dumps(p["aliases"]), n))
+    c.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('parties_seeded', '1')")
+
+
+def replace_parties(parties):
+    """Swap the whole party list (Busy import)."""
+    with _conn() as c:
+        c.execute("DELETE FROM parties")
+        _insert_parties(c, parties)
 
 
 def delete_item(code):

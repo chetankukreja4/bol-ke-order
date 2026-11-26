@@ -37,7 +37,7 @@ from .dialog import answer, build_draft, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
-from . import pilot
+from . import importer, pilot
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
 MAX_UPLOAD = 30 * 1024 * 1024
@@ -164,6 +164,37 @@ def items_update(code: str, body: ItemIn):
     saved = db.save_item(item, old_code=code)
     catalog.replace_items(db.list_items())
     return saved
+
+
+MAX_IMPORT = 5 * 1024 * 1024
+
+
+async def _read_import(file: UploadFile, convert):
+    data = await file.read(MAX_IMPORT + 1)
+    if len(data) > MAX_IMPORT:
+        raise HTTPException(400, "File 5 MB se badi hai")
+    try:
+        rows = importer.read_table(file.filename or "", data)
+    except importer.ImportProblem as e:
+        raise HTTPException(400, str(e))
+    found, skipped = convert(rows)
+    return rows, found, skipped
+
+
+def _import_reply(rows, found, skipped, committed):
+    return {"total_rows": len(rows), "count": len(found), "sample": found[:10],
+            "skipped": skipped, "committed": committed}
+
+
+@app.post("/api/items/import")
+async def items_import(file: UploadFile = File(...), commit: int = 0):
+    """Busy item list. Without commit=1 it only shows what would be loaded."""
+    rows, items, skipped = await _read_import(file, importer.to_items)
+    done = bool(commit) and bool(items)
+    if done:
+        db.replace_items(items)
+        catalog.replace_items(db.list_items())
+    return _import_reply(rows, items, skipped, done)
 
 
 @app.delete("/api/items/{code}")

@@ -171,6 +171,16 @@ def save_item(item, old_code=None):
     return get_item(item["code"])
 
 
+def replace_items(items):
+    """Swap the whole item list (Busy import). Orders keep their own copy of names."""
+    with _conn() as c:
+        c.execute("DELETE FROM items")
+        for n, it in enumerate(items):
+            c.execute("INSERT INTO items (code, name, unit, grp, aliases, pos) VALUES (?,?,?,?,?,?)",
+                      (it["code"], it["name"], it["unit"], it["group"], json.dumps(it["aliases"]), n))
+        c.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('items_seeded', '1')")
+
+
 def delete_item(code):
     with _conn() as c:
         return c.execute("DELETE FROM items WHERE code=?", (code,)).rowcount > 0

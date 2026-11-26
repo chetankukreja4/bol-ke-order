@@ -82,6 +82,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
 | `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
 | `app/pilot.py` | Pilot numbers: `new_stats()` starts the stats that ride in the draft (source, questions, corrections, test order); `summary()` and `csv_rows()` for `/api/pilot` and `/api/pilot.csv` (practice orders left out) |
+| `app/importer.py` | Reads a Busy export (CSV or .xlsx; title rows above the header are skipped) into the item list: Busy columns Name/Alias/Group/Main Unit or simple code,name,unit,group,aliases. Units map to the app's units (unknown = piece). `.xls` is refused with a message |
 | `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
@@ -155,6 +156,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| item import (branch `pilot-ready`) | `POST /api/items/import` (preview; `?commit=1` replaces the item list). Needs `openpyxl` (added to requirements) |
 | pilot tab (branch `pilot-ready`) | Pilot tab (numbers, baseline stopwatch times, CSV); "Galat nikla" on a saved parchi; "Practice order" tick on the Order page; the app sends mic/upload/transcript/typed. Checked in the browser on a scratch DB: 3 orders, one marked wrong, phone size, dark theme |
 | pilot numbers saved (branch `pilot-ready`) | Orders save `stats` + `seconds_to_confirm` (old DBs get the new columns automatically); `POST /api/orders/{id}/wrong` (Galat nikla); `GET /api/pilot`, `/api/pilot.csv`, `PUT /api/pilot/baseline` |
 | pilot stats (branch `pilot-ready`) | Each draft carries `stats`: start time, source, questions answered, corrections; `/api/parse` takes `source` and `test` |

@@ -1,7 +1,7 @@
 """Pilot numbers: what each order cost the shop in time, questions and corrections."""
 from datetime import datetime
 
-from .parser import IST
+from .parser import IST, today
 
 SOURCES = ("mic", "upload", "transcript", "typed")
 
@@ -24,3 +24,63 @@ def new_stats(source, draft, test=False):
         "lines": len(draft["lines"]),
         "test": bool(test),
     }
+
+
+WRONG_REASONS = ("item", "qty", "party", "missing", "other")
+CSV_HEADER = ["id", "created_at", "party", "lines", "source", "test", "seconds_to_confirm",
+              "questions", "corrections", "uncertain_start", "wrong_reason"]
+
+
+def _median(vals):
+    vals = sorted(vals)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    return round(vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2, 1)
+
+
+def _pct(part, whole):
+    return round(100 * part / whole) if whole else None
+
+
+def _is_test(o):
+    return bool((o.get("stats") or {}).get("test"))
+
+
+def summary(orders, baseline):
+    """The numbers for the deck. Practice orders are left out of everything."""
+    real = [o for o in orders if not _is_test(o)]
+    with_stats = [o for o in real if o.get("stats")]
+    times = [o["seconds_to_confirm"] for o in real if o.get("seconds_to_confirm") is not None]
+    by_source, wrong = {}, {}
+    for o in with_stats:
+        src = o["stats"].get("source", "typed")
+        by_source[src] = by_source.get(src, 0) + 1
+    for o in real:
+        if o.get("wrong_reason"):
+            wrong[o["wrong_reason"]] = wrong.get(o["wrong_reason"], 0) + 1
+    day = today().isoformat()
+    corrections = sum(o["stats"].get("corrections", 0) for o in with_stats)
+    return {
+        "orders": len(real),
+        "today": sum(1 for o in real if str(o.get("created_at", "")).startswith(day)),
+        "median_seconds": _median(times),
+        "avg_seconds": round(sum(times) / len(times), 1) if times else None,
+        "pct_no_questions": _pct(sum(1 for o in with_stats if not o["stats"].get("questions")), len(with_stats)),
+        "pct_right_after_save": _pct(sum(1 for o in real if not o.get("wrong_reason")), len(real)),
+        "corrections_per_order": round(corrections / len(with_stats), 2) if with_stats else None,
+        "by_source": by_source,
+        "wrong_by_reason": wrong,
+        "baseline_median": _median(baseline),
+        "baseline_count": len(baseline),
+    }
+
+
+def csv_rows(orders):
+    rows = [CSV_HEADER]
+    for o in orders:
+        st = o.get("stats") or {}
+        rows.append([o["id"], o["created_at"], o["party"], len(o["lines"]), st.get("source", ""),
+                     bool(st.get("test")), o.get("seconds_to_confirm"), st.get("questions", ""),
+                     st.get("corrections", ""), st.get("uncertain_start", ""), o.get("wrong_reason") or ""])
+    return rows

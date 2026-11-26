@@ -81,7 +81,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`):
 | `app/dialog.py` | Draft order, read-back text, next question, applying answers and corrections, save checks |
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
 | `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
-| `app/pilot.py` | Pilot numbers: `new_stats()` starts the stats that ride in the draft (source, questions, corrections, test order) |
+| `app/pilot.py` | Pilot numbers: `new_stats()` starts the stats that ride in the draft (source, questions, corrections, test order); `summary()` and `csv_rows()` for `/api/pilot` and `/api/pilot.csv` (practice orders left out) |
 | `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (4 tabs: Order, Orders, Dispatch, Items), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
@@ -155,6 +155,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| pilot numbers saved (branch `pilot-ready`) | Orders save `stats` + `seconds_to_confirm` (old DBs get the new columns automatically); `POST /api/orders/{id}/wrong` (Galat nikla); `GET /api/pilot`, `/api/pilot.csv`, `PUT /api/pilot/baseline` |
 | pilot stats (branch `pilot-ready`) | Each draft carries `stats`: start time, source, questions answered, corrections; `/api/parse` takes `source` and `test` |
 | plan (branch `pilot-ready`) | Implementation plan `docs/superpowers/plans/2026-11-27-pilot-ready.md` (7 tasks; 1-3 first) |
 | design doc (branch `pilot-ready`) | Design for shop-ready + pilot numbers; no code change yet |

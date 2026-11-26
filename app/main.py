@@ -1,6 +1,7 @@
 """Bol-ke-Order API + static frontend."""
 import csv
 import io
+import json
 import os
 import re
 import tempfile
@@ -216,6 +217,54 @@ def _csv(rows):
             w.writerow([o["id"], o["party"], ln["code"], ln["name"], ln["qty"], ln["unit"], o["delivery_date"], o["status"]])
     buf.seek(0)
     return buf
+
+
+class WrongIn(BaseModel):
+    reason: str
+
+
+class BaselineIn(BaseModel):
+    seconds: list[float]
+
+
+@app.post("/api/orders/{order_id}/wrong")
+def order_wrong(order_id: int, body: WrongIn):
+    if body.reason not in pilot.WRONG_REASONS:
+        raise HTTPException(400, f"Reason must be one of: {', '.join(pilot.WRONG_REASONS)}")
+    o = db.mark_wrong(order_id, body.reason)
+    if not o:
+        raise HTTPException(404, "Order not found")
+    return o
+
+
+def _baseline():
+    raw = db.get_meta("baseline_seconds")
+    return json.loads(raw) if raw else []
+
+
+@app.get("/api/pilot")
+def pilot_numbers():
+    base = _baseline()
+    out = pilot.summary(db.list_orders(100000), base)
+    out["baseline"] = base
+    return out
+
+
+@app.put("/api/pilot/baseline")
+def pilot_baseline(body: BaselineIn):
+    if len(body.seconds) > 50 or any(not 1 <= s <= 3600 for s in body.seconds):
+        raise HTTPException(400, "1 se 3600 second tak, 50 times tak")
+    db.set_meta("baseline_seconds", json.dumps(body.seconds))
+    return {"baseline": body.seconds}
+
+
+@app.get("/api/pilot.csv")
+def pilot_csv():
+    buf = io.StringIO()
+    csv.writer(buf).writerows(pilot.csv_rows(db.list_orders(100000)))
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="pilot-numbers.csv"'})
 
 
 @app.get("/api/orders/{order_id}/csv")

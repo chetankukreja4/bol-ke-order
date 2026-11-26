@@ -154,6 +154,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| plan (branch `pilot-ready`) | Implementation plan `docs/superpowers/plans/2026-11-27-pilot-ready.md` (7 tasks; 1-3 first) |
 | design doc (branch `pilot-ready`) | Design for shop-ready + pilot numbers; no code change yet |
 | parser fix (after `948189e`) | Parser: keep order clauses that mention rate, "uski/usmein" point to the last item, "agar ... nahi toh" gives two quantities to ask; condition shown on the line |
 | `d5bc63c` | Dispatch keeps context between turns; Hindi "हां पक्का" works; find orders by number; several orders in one truck; split joined numbers like 345 |

@@ -182,3 +182,5 @@ button.row-card:hover { border-color: var(--green); }
   .pills { order: 3; width: 100%; }
   .pill { font-size: 11px; }
 }
+.heard-note { font-size: 14px; color: var(--muted); margin: 10px 2px 0; }
+.heard-note:empty { display: none; }

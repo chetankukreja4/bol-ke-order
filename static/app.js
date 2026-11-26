@@ -386,11 +386,14 @@ function renderDone(viewOnly) {
   $('dnNew').textContent = viewOnly ? '← Back to orders' : '+ New order';
   $('dnNew').onclick = viewOnly ? () => show('orders') : () => { state.draft = null; state.blob = null; show('order'); };
   const rows = o.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.name)}<br><small>${esc(l.code)}</small></td><td><b>${esc(l.qty)}</b> ${esc(l.unit)}</td></tr>`).join('');
+  const fmtDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const created = new Date(o.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   $('parchi').innerHTML = `<h2>PARCHI #${o.id}</h2>
-    <div class="meta"><span><b>${esc(o.party)}</b></span><span>Delivery: ${esc(o.delivery_date)}</span></div>
-    <div class="meta"><small>Created ${esc(o.created_at.replace('T', ' '))}</small><small>Status: ${esc(o.status)}</small></div>
-    <table><tr><th>#</th><th>Item</th><th>Qty</th></tr>${rows}</table>
-    <p><small>Heard: "${esc(o.heard_text)}"</small></p>`;
+    <div class="meta"><span><b>${esc(o.party)}</b></span><span>Delivery: <b>${esc(fmtDate(o.delivery_date))}</b></span></div>
+    <div class="meta"><small>Order taken ${esc(created)}</small>${o.dispatch_mode ? `<small>Sent by ${esc(o.dispatch_mode)}</small>` : ''}</div>
+    <table><tr><th>#</th><th>Item</th><th>Qty</th></tr>${rows}</table>`;
+  // What the app heard is for staff to check on screen only; it is not printed.
+  $('dnHeard').innerHTML = o.heard_text ? `<b>App ne suna:</b> "${esc(o.heard_text)}"` : '';
   $('dnCsv').href = `/api/orders/${o.id}/csv`;
 }
 

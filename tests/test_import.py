@@ -121,3 +121,73 @@ def test_busy_account_list_keeps_only_debtors_and_asks_which_one():
 def test_party_list_without_group_column_keeps_all():
     parties, skipped = to_parties(read_table("p.csv", b"Party Name\nBansal Store\nKhanna Traders\n"))
     assert [p["name"] for p in parties] == ["Bansal Store", "Khanna Traders"] and skipped == []
+
+
+# ------------------------------------------------ final review fixes
+def _commit_items(csv_text):
+    client.post("/api/items/import?commit=1", files={"file": ("i.csv", csv_text.encode(), "text/csv")})
+
+
+def _commit_parties(csv_text):
+    return client.post("/api/parties/import?commit=1", files={"file": ("p.csv", csv_text.encode(), "text/csv")}).json()
+
+
+def test_real_busy_groups_do_not_block_full_item_names():
+    _commit_items("Name,Group,Unit\nLux Soap,HUL,Box\nToor Dal,Pulses,Bori\nHaldi Powder,Masala,Pkt\n"
+                  "Surf Excel,Detergent Powder,Box\n")
+    for text, name in [("ABC ko 10 carton lux soap kal", "Lux Soap"), ("ABC ko 2 bori toor dal kal", "Toor Dal"),
+                       ("ABC ko 5 packet haldi powder kal", "Haldi Powder")]:
+        ln = client.post("/api/parse", json={"text": text}).json()["lines"][0]
+        assert ln["match"] == "ok" and ln["item"]["name"] == name, text
+
+
+def test_generic_word_never_asks_with_no_options():
+    _commit_items("Name,Group,Unit\nLux Soap,HUL,Box\nToor Dal,Pulses,Bori\n")
+    ln = client.post("/api/parse", json={"text": "ABC ko 10 carton sabun kal"}).json()["lines"][0]
+    assert ln["match"] != "ok" and (ln["options"] or ln["match"] == "unknown")
+    assert not (ln["match"] == "choose" and not ln["options"])
+
+
+def test_group_only_from_exact_busy_group_name():
+    items, _ = to_items(read_table("g.csv", b"Name,Group\nA one,Soaps\nB two,Masala Powder\nC three,Dalda\nD four,Detergents\n"))
+    assert [i["group"] for i in items] == ["soap", None, None, "detergent"]
+
+
+def test_numeric_or_short_busy_alias_never_names_a_party():
+    _commit_parties("Name,Alias\nVerma Store,10\nGupta Kirana,GK\n")
+    d = client.post("/api/parse", json={"text": "Gupta ko 10 carton Lux kal"}).json()
+    assert d["party"]["party"]["name"] == "Gupta Kirana"
+    assert "10" not in [a for p in client.get("/api/parties").json() for a in p["aliases"]]
+
+
+def test_reimport_keeps_party_codes():
+    first = {p["name"]: p["code"] for p in _commit_parties("Name\nVerma Store\nGupta Kirana\n") and client.get("/api/parties").json()}
+    _commit_parties("Name\nAgarwal Traders\nGupta Kirana\nVerma Store\n")
+    second = {p["name"]: p["code"] for p in client.get("/api/parties").json()}
+    assert second["Verma Store"] == first["Verma Store"] and second["Gupta Kirana"] == first["Gupta Kirana"]
+    assert second["Agarwal Traders"] not in first.values()
+
+
+def test_near_duplicate_party_names_ask():
+    _commit_parties("Name\nShiv Traders\nShiva Traders\n")
+    d = client.post("/api/parse", json={"text": "Shiv Trader ko 10 carton Lux kal"}).json()
+    assert d["party"]["status"] == "choose"
+
+
+def test_debtor_subgroups_kept_other_ledgers_dropped():
+    parties, skipped = to_parties(read_table("a.csv", b"Name,Group\nRam Kirana,Delhi Parties\nShyam Store,Sundry Debtors\n"
+                                                      b"HDFC Bank,Bank Accounts\nRent,Indirect Expenses\nAmul Dist,Sundry Creditors\n"))
+    assert [p["name"] for p in parties] == ["Ram Kirana", "Shyam Store"]
+    assert len(skipped) == 3
+
+
+def test_keyterms_keep_parties_with_big_item_list():
+    from app import stt
+    _commit_items("Name\n" + "".join(f"Item number {n}\n" for n in range(80)))
+    terms = stt._keyterms()
+    assert "ABC Traders" in terms and len(terms) <= 50
+
+
+def test_csv_with_odd_bytes_reads():
+    items, _ = to_items(read_table("x.csv", b"name,unit\nA\x81B,kg\n"))
+    assert len(items) == 1

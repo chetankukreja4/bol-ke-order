@@ -73,7 +73,7 @@ SAMPLE_PARTIES = [
     {"code": "P07", "name": "Jain Brothers", "aliases": ["jain", "jain brothers", "jain bhai", "jain sahab"]},
 ]
 # Words that never name one party on their own ("New Punjab" and "New Delhi Traders").
-GENERIC_PARTY_WORDS = {"new", "shree", "shri", "sri", "jai", "the", "m/s", "ms"}
+GENERIC_PARTY_WORDS = {"new", "shree", "shri", "sri", "jai", "jay", "maa", "the", "m/s", "ms"}
 
 
 def ambiguous_words(parties):

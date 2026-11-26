@@ -15,7 +15,7 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
 <header class="top no-print">
@@ -183,12 +183,12 @@
     <h2>Pilot numbers</h2>
     <a class="btn btn-outline btn-sm" href="/api/pilot.csv">⬇ CSV</a>
   </div>
-  <p class="sub">Har asli order ka hisaab. Practice orders yahan nahi gine jaate.</p>
+  <p class="sub">Har asli order ka hisaab. Practice orders yahan nahi gine jaate. App ka time mic dabane / recording ya transcript daalne se "haan pakka" tak hai; Busy mein CSV daalna isme shamil nahi.</p>
   <div id="pilotTiles" class="stats"></div>
   <div id="pilotMore" class="card"></div>
   <details class="card">
     <summary>Pehle ka time (parchi + Busy)</summary>
-    <p class="sub">Pilot se pehle stopwatch se 5 phone orders naapein: call khatam hone se Busy mein entry tak. Second mein likhein, comma se alag.</p>
+    <p class="sub">Pilot se pehle stopwatch se 5 phone orders naapein: call khatam hone se Busy mein entry tak. Second mein likhein, comma se alag. (Deck mein app ke time ke saath Busy mein CSV daalne ka time bhi jodein, taaki dono ek jaisa naapein.)</p>
     <div class="row"><input id="baseInput" inputmode="numeric" placeholder="180, 240, 150"><button id="baseSave" class="btn">Save</button></div>
   </details>
 </section>
@@ -214,6 +214,6 @@
 </dialog>
 
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

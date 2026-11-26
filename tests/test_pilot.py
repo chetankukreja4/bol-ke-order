@@ -89,3 +89,11 @@ def test_pilot_csv_and_baseline():
     assert client.put("/api/pilot/baseline", json={"seconds": [0]}).status_code == 400
     r = client.get("/api/pilot.csv")
     assert r.text.splitlines()[0].startswith("id,created_at,party")
+
+
+def test_clock_starts_when_capture_started():
+    d = client.post("/api/parse", json={"text": "ABC wale ko 10 carton Lux kal", "elapsed": 40}).json()
+    o = client.post("/api/orders", json={"draft": d}).json()
+    assert 40 <= o["seconds_to_confirm"] < 45
+    d = client.post("/api/parse", json={"text": "ABC wale ko 10 carton Lux kal", "elapsed": 99999}).json()
+    assert client.post("/api/orders", json={"draft": d}).json()["seconds_to_confirm"] <= 1805

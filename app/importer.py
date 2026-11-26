@@ -9,7 +9,9 @@ import csv
 import io
 import re
 
-from .catalog import GROUP_WORDS, unit_from_word
+from rapidfuzz import fuzz
+
+from .catalog import GENERIC_PARTY_WORDS, GROUP_WORDS, unit_from_word
 
 MAX_ROWS = 20000
 HEADER_SCAN = 10
@@ -48,7 +50,7 @@ def _cell(v):
 def _grid(filename, data):
     name = (filename or "").lower()
     if name.endswith(".csv"):
-        for enc in ("utf-8-sig", "cp1252"):
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):  # latin-1 reads any byte
             try:
                 text = data.decode(enc)
                 break
@@ -96,18 +98,27 @@ def _unit(text):
 
 
 def _group(text):
+    """Only a Busy group named exactly like an app group ("Soap", "Soaps",
+    "Detergent"). "Masala Powder" or "Dalda" are not the detergent or dal group."""
     t = _key(text)
-    for g, words in GROUP_WORDS.items():
-        if any(w in t for w in words):
-            return g
+    for cand in (t, t[:-1] if t.endswith("s") else t):
+        for g, words in GROUP_WORDS.items():
+            if cand == g or cand in words:
+                return g
     return None
+
+
+def _spoken(a):
+    """A spoken name must have letters and 3+ characters: a Busy alias like
+    "10" or "GK" would otherwise match words said in every order."""
+    return len(a) >= 3 and any(ch.isalpha() for ch in a)
 
 
 def _aliases(name, extra):
     out, seen = [], set()
-    for a in [name] + [x for e in extra for x in re.split(r"[|,]", e)]:
+    for n, a in enumerate([name] + [x for e in extra for x in re.split(r"[|,]", e)]):
         a = _key(a)
-        if a and a not in seen and len(a) <= 60:
+        if a and a not in seen and len(a) <= 60 and (n == 0 or _spoken(a)):
             seen.add(a)
             out.append(a)
     return out[:30]
@@ -123,9 +134,16 @@ def _code(raw, used, prefix):
     return f"{prefix}{n:03d}"
 
 
-def to_items(rows):
+def _old_codes(existing):
+    """Same name as before -> same code, so saved orders keep pointing at it."""
+    return {e["name"].strip().lower(): e["code"] for e in existing or []}
+
+
+def to_items(rows, existing=()):
     """Busy item rows -> (items in the Items page shape, skipped rows with a reason)."""
     items, skipped, names, used = [], [], set(), set()
+    old = _old_codes(existing)
+    used |= set(old.values())  # codes of earlier items are never handed to a new name
     for n, row in enumerate(rows, 1):
         name = _pick(row, ITEM_COLS["name"])
         if not name or len(name) > 80:
@@ -135,7 +153,9 @@ def to_items(rows):
             skipped.append({"row": n, "name": name, "reason": "dobara aaya"})
             continue
         names.add(name.lower())
-        code = _code(_pick(row, ITEM_COLS["code"]), used, "I")
+        raw = _pick(row, ITEM_COLS["code"])
+        code = old.get(name.lower()) if not raw else None
+        code = code or _code(raw, used, "I")
         used.add(code)
         items.append({
             "code": code, "name": name,
@@ -146,19 +166,30 @@ def to_items(rows):
     return items, skipped
 
 
-def to_parties(rows):
+# Busy's own ledger groups that are never customers. Customers sit under
+# "Sundry Debtors" or a shop-made sub-group of it ("Delhi Parties").
+NOT_CUSTOMER = ("bank", "cash", "expense", "creditor", "dut", "tax", "capital", "loan", "income",
+                "purchase", "sale", "stock", "asset", "liabilit", "reserve", "provision", "suspense",
+                "deposit", "investment", "branch", "profit")
+
+
+def _customer_group(group):
+    g = _key(group)
+    return not g or "debtor" in g or not any(w in g for w in NOT_CUSTOMER)
+
+
+def to_parties(rows, existing=()):
     """Busy account rows -> (parties, skipped). A Busy account list also has
-    banks, expenses and suppliers: when it has a group column with
-    "Sundry Debtors", only those rows (customers) are kept."""
-    has_group = any(_pick(r, PARTY_COLS["group"]) for r in rows)
-    debtors_only = has_group and any("debtor" in _key(_pick(r, PARTY_COLS["group"])) for r in rows)
+    banks, expenses and suppliers; rows under those groups are skipped."""
     parties, skipped, names = [], [], set()
+    old = _old_codes(existing)
+    used = set(old.values())
     for n, row in enumerate(rows, 1):
         name = _pick(row, PARTY_COLS["name"])
         if not name or len(name) > 80:
             skipped.append({"row": n, "name": name, "reason": "naam nahi"})
             continue
-        if debtors_only and "debtor" not in _key(_pick(row, PARTY_COLS["group"])):
+        if not _customer_group(_pick(row, PARTY_COLS["group"])):
             skipped.append({"row": n, "name": name, "reason": "customer nahi"})
             continue
         if name.lower() in names:
@@ -166,8 +197,21 @@ def to_parties(rows):
             continue
         names.add(name.lower())
         first_two = " ".join(name.split()[:2])
+        code = old.get(name.lower()) or _code("", used, "P")
+        used.add(code)
         parties.append({
-            "code": f"P{len(parties) + 1:03d}", "name": name,
+            "code": code, "name": name,
             "aliases": _aliases(name, [first_two] + [row.get(c, "") for c in PARTY_COLS["aliases"]]),
         })
+    # Staff say "Gupta ko" or "Gupta ji ko". When only one party starts with
+    # that word, it is a spoken name; when several do, the app asks which one.
+    firsts = {}
+    for p in parties:
+        w = _key(p["name"]).split()[0]
+        firsts.setdefault(w, []).append(p)
+    for w, ps in firsts.items():
+        # "Shiv" next to "Shiva": speech-to-text swaps these, so neither becomes a spoken name
+        close = any(o != w and fuzz.ratio(o, w) >= 80 for o in firsts)
+        if len(ps) == 1 and _spoken(w) and w not in GENERIC_PARTY_WORDS and not close:
+            ps[0]["aliases"] = _aliases(ps[0]["name"], [", ".join(ps[0]["aliases"][1:]), w, f"{w} ji"])
     return parties, skipped

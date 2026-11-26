@@ -82,11 +82,12 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
 | `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
 | `app/pilot.py` | Pilot numbers: `new_stats()` starts the stats that ride in the draft (source, questions, corrections, test order); `summary()` and `csv_rows()` for `/api/pilot` and `/api/pilot.csv` (practice orders left out) |
-| `app/importer.py` | Reads a Busy export (CSV or .xlsx; title rows above the header are skipped) into the item list: Busy columns Name/Alias/Group/Main Unit or simple code,name,unit,group,aliases. Units map to the app's units (unknown = piece). `.xls` is refused with a message |
-| `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
+| `app/importer.py` | Reads a Busy export (CSV or .xlsx; title rows above the header are skipped) into the item list: Busy columns Name/Alias/Group/Main Unit or simple code,name,unit,group,aliases. Units map to the app's units (unknown = piece). `.xls` is refused with a message. Also the party list (`to_parties`): ledgers under bank/expense/creditor/tax groups are skipped, Sundry Debtors and its sub-groups kept. Spoken names need letters and 3+ characters (a Busy alias like "10" is dropped). A unique first word ("Gupta") becomes a spoken name unless it is close to another party's ("Shiv"/"Shiva"). Re-import keeps the code of a party or item with the same name |
+| `app/db.py` | SQLite `orders`, `items` and `parties` tables (items and parties seeded from the samples once); orders also keep `stats`, `seconds_to_confirm`, `wrong_reason` |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
 | `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
+| `tests/test_import.py`, `tests/test_pilot.py` | 18 + 10 tests: Busy imports, which-party questions, pilot numbers. 72 tests in all |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -94,7 +95,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 44 tests (inside .venv or the container)
+pytest -q                          # 72 tests (inside .venv or the container)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -106,7 +107,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 44 tests pass (rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
+- 72 tests pass (28 new on branch `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
 - Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
 - In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
 - The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
@@ -164,6 +165,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| review fixes (branch `pilot-ready`) | After a whole-branch review: exact full item names are accepted even with a generic word ("toor dal", "haldi powder"), a "which brand?" never has zero options and shows at most 8; Busy group only from an exact name; numeric/short aliases dropped and numbers never name a party; near-same party names ("Shiv"/"Shiva") ask; party and item codes stay the same on re-import; Sarvam keyterms keep 20 parties first; odd CSV bytes read; the pilot clock starts when staff start the order (browser sends `elapsed`), and the Pilot tab says what is timed |
 | deploy notes (branch `pilot-ready`) | Shop-day checklist (section 8); DEPLOY.md: import Busy lists after the first deploy |
 | import buttons (branch `pilot-ready`) | Items tab: "Busy se items laayein" / "Busy se parties laayein" (preview, then "Haan" replaces the list) and a read-only Parties list. Checked in the browser on a scratch DB: CSV with a title row, 3 items + 2 debtor parties loaded, "Verma ko ..." asks which Verma, new item matched |
 | party import (branch `pilot-ready`) | Parties in SQLite (`parties` table); `GET /api/parties`, `POST /api/parties/import` (only Sundry Debtors when the file has groups). "Which Sharma?" words are worked out from the list (`catalog.ambiguous_words`), so imported parties ask too |

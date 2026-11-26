@@ -59,6 +59,7 @@ class TextIn(BaseModel):
     kind: str | None = None  # "transcript" = pasted call transcript
     source: str | None = None  # mic | upload | transcript | typed (pilot numbers)
     test: bool = False  # practice order: left out of the pilot numbers
+    elapsed: float | None = None  # seconds since staff started this order (mic / upload / paste)
 
 
 class AnswerIn(BaseModel):
@@ -190,7 +191,7 @@ def _import_reply(rows, found, skipped, committed):
 @app.post("/api/items/import")
 async def items_import(file: UploadFile = File(...), commit: int = 0):
     """Busy item list. Without commit=1 it only shows what would be loaded."""
-    rows, items, skipped = await _read_import(file, importer.to_items)
+    rows, items, skipped = await _read_import(file, lambda r: importer.to_items(r, catalog.CATALOG))
     done = bool(commit) and bool(items)
     if done:
         db.replace_items(items)
@@ -206,7 +207,7 @@ def parties_list():
 @app.post("/api/parties/import")
 async def parties_import(file: UploadFile = File(...), commit: int = 0):
     """Busy account list (customers). Without commit=1 it only shows what would be loaded."""
-    rows, parties, skipped = await _read_import(file, importer.to_parties)
+    rows, parties, skipped = await _read_import(file, lambda r: importer.to_parties(r, catalog.PARTIES))
     done = bool(commit) and bool(parties)
     if done:
         db.replace_parties(parties)
@@ -230,10 +231,10 @@ def parse(body: TextIn):
         draft = build_draft(cleaned["text"])
         draft["source"] = "transcript"
         draft["turns"] = cleaned["turns"]
-        draft["stats"] = pilot.new_stats("transcript", draft, body.test)
+        draft["stats"] = pilot.new_stats("transcript", draft, body.test, body.elapsed)
         return draft
     draft = build_draft(text)
-    draft["stats"] = pilot.new_stats(body.source, draft, body.test)
+    draft["stats"] = pilot.new_stats(body.source, draft, body.test, body.elapsed)
     return draft
 
 

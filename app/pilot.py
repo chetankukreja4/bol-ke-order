@@ -1,5 +1,5 @@
 """Pilot numbers: what each order cost the shop in time, questions and corrections."""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .parser import IST, today
 
@@ -10,13 +10,23 @@ def now_iso():
     return datetime.now(IST).isoformat(timespec="seconds")
 
 
-def new_stats(source, draft, test=False):
-    """Stats that travel inside the draft until the order is saved."""
+MAX_ELAPSED = 1800  # 30 min: anything longer is a tab left open, not order time
+
+
+def new_stats(source, draft, test=False, elapsed=None):
+    """Stats that travel inside the draft until the order is saved.
+    `elapsed` = seconds the browser says passed since staff started the order
+    (pressed the mic, picked a recording, opened paste/type), so the clock
+    covers speaking and transcription too, not only the checking."""
+    try:
+        back = min(max(float(elapsed or 0), 0), MAX_ELAPSED)
+    except (TypeError, ValueError):
+        back = 0
     uncertain = sum(1 for ln in draft["lines"] if ln.get("uncertain"))
     if draft["party"]["status"] != "ok":
         uncertain += 1
     return {
-        "started_at": now_iso(),
+        "started_at": (datetime.now(IST) - timedelta(seconds=back)).isoformat(timespec="seconds"),
         "source": source if source in SOURCES else "typed",
         "questions": 0,
         "corrections": 0,

@@ -315,6 +315,7 @@ async function parseTranscript() {
   try {
     const d = await post('/api/parse', {
       text, kind: state.textKind || null, source: state.source || 'typed', test: $('testOrder').checked,
+      elapsed: state.startedAt ? (Date.now() - state.startedAt) / 1000 : null,
     });
     state.draft = d;
     if (d.notice === 'unclear') {
@@ -377,6 +378,7 @@ async function saveOrder() {
   if (!state.draft?.ready) return toast('Pehle sawaal ka jawab dein');
   try {
     state.order = await post('/api/orders', { draft: state.draft });
+    state.startedAt = null; // the next order starts its own clock
     renderDone();
     speak(`Order ${state.order.id} save ho gaya.`);
   } catch (e) {
@@ -389,7 +391,7 @@ function renderDone(viewOnly) {
   show('done');
   $('dnTitle').textContent = viewOnly ? `Parchi #${o.id}` : '✔ Order saved';
   $('dnNew').textContent = viewOnly ? '← Back to orders' : '+ New order';
-  $('dnNew').onclick = viewOnly ? () => show('orders') : () => { state.draft = null; state.blob = null; show('order'); };
+  $('dnNew').onclick = viewOnly ? () => show('orders') : () => { state.draft = null; state.blob = null; state.startedAt = null; show('order'); };
   const rows = o.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.name)}<br><small>${esc(l.code)}</small></td><td><b>${esc(l.qty)}</b> ${esc(l.unit)}</td></tr>`).join('');
   const fmtDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const created = new Date(o.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
@@ -437,7 +439,7 @@ async function loadPilot() {
   const tile = (big, label) => `<div class="stat"><b>${big}</b><span>${label}</span></div>`;
   $('pilotTiles').innerHTML = [
     tile(`${p.today} / ${p.orders}`, 'Orders (aaj / kul)'),
-    tile(fmtSec(p.median_seconds), 'Order pakka hone ka time (median)'),
+    tile(fmtSec(p.median_seconds), 'App: order shuru se pakka (median)'),
     tile(fmtSec(p.baseline_median), 'Pehle: parchi + Busy (median)'),
     tile(fmtPct(p.pct_right_after_save), 'Save ke baad sahi nikle'),
     tile(fmtPct(p.pct_no_questions), 'Bina sawaal ke pakke'),
@@ -761,6 +763,14 @@ async function init() {
   };
   $('typedGo').onclick = () => { state.source = 'typed'; showTranscript($('typed').value, false); };
   $('baseSave').onclick = saveBaseline;
+  // Pilot clock: starts when staff begin an order (mic, recording, paste, type, sample).
+  const startClock = () => { if (!state.startedAt) state.startedAt = Date.now(); };
+  ['micOrder', 'pasteOpen', 'typedOpen'].forEach((id) => {
+    $(id).addEventListener('pointerdown', startClock);
+    $(id).addEventListener('click', startClock);
+  });
+  $('fileInput').addEventListener('click', startClock);
+  $('samples').addEventListener('click', startClock, true);
   try { $('testOrder').checked = localStorage.getItem('bko-test') === '1'; } catch (_) {}
   $('testOrder').onchange = () => { try { localStorage.setItem('bko-test', $('testOrder').checked ? '1' : '0'); } catch (_) {} };
   $('trGo').onclick = parseTranscript;
@@ -771,7 +781,7 @@ async function init() {
   $('cfConfirm').onclick = saveOrder;
   $('cfBack').onclick = () => { showTranscript(state.draft?.heard || '', false, 'Text theek karein, phir Samjho dabayein.'); clearTimeout(state.autoTimer); };
   $('dnPrint').onclick = () => window.print();
-  $('dnNew').onclick = () => { state.draft = null; state.blob = null; show('order'); };
+  $('dnNew').onclick = () => { state.draft = null; state.blob = null; state.startedAt = null; show('order'); };
   const openCard = (id, field) => {
     ['pasteCard', 'typedCard'].forEach((c) => { if (c !== id) $(c).classList.add('hidden'); });
     const c = $(id); c.classList.toggle('hidden');

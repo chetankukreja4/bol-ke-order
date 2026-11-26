@@ -1,4 +1,4 @@
-"""SQLite storage for confirmed orders."""
+"""SQLite storage for confirmed orders and the shop's item list."""
 import json
 import os
 import sqlite3
@@ -23,6 +23,15 @@ CREATE TABLE IF NOT EXISTS orders (
     heard_text TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS items (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    grp TEXT,                     -- soap | detergent | dal | NULL
+    aliases TEXT NOT NULL,        -- JSON list of spoken names
+    pos INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 """
 
 
@@ -84,3 +93,44 @@ def mark_dispatched(order_id, mode):
         c.execute("UPDATE orders SET status='dispatched', dispatch_mode=?, dispatch_date=? WHERE id=?",
                   (mode, today().isoformat(), order_id))
         return get_order(order_id, c)
+
+
+# ------------------------------------------------------------------- items
+def _item(r):
+    return {"code": r["code"], "name": r["name"], "unit": r["unit"], "group": r["grp"],
+            "aliases": json.loads(r["aliases"])}
+
+
+def list_items():
+    """All items. Seeds the sample catalog the first time the database is used."""
+    from .catalog import SAMPLE_ITEMS
+    with _conn() as c:
+        if not c.execute("SELECT 1 FROM meta WHERE k='items_seeded'").fetchone():
+            for n, it in enumerate(SAMPLE_ITEMS):
+                c.execute("INSERT OR IGNORE INTO items (code, name, unit, grp, aliases, pos) VALUES (?,?,?,?,?,?)",
+                          (it["code"], it["name"], it["unit"], it["group"], json.dumps(it["aliases"]), n))
+            c.execute("INSERT INTO meta (k, v) VALUES ('items_seeded', '1')")
+        return [_item(r) for r in c.execute("SELECT * FROM items ORDER BY pos, code")]
+
+
+def get_item(code):
+    with _conn() as c:
+        r = c.execute("SELECT * FROM items WHERE code=?", (code,)).fetchone()
+        return _item(r) if r else None
+
+
+def save_item(item, old_code=None):
+    """Insert, or update the item that had old_code (the code itself may change)."""
+    with _conn() as c:
+        row = (item["code"], item["name"], item["unit"], item["group"], json.dumps(item["aliases"]))
+        if old_code:
+            c.execute("UPDATE items SET code=?, name=?, unit=?, grp=?, aliases=? WHERE code=?", row + (old_code,))
+        else:
+            pos = c.execute("SELECT COALESCE(MAX(pos), -1) + 1 FROM items").fetchone()[0]
+            c.execute("INSERT INTO items (code, name, unit, grp, aliases, pos) VALUES (?,?,?,?,?,?)", row + (pos,))
+    return get_item(item["code"])
+
+
+def delete_item(code):
+    with _conn() as c:
+        return c.execute("DELETE FROM items WHERE code=?", (code,)).rowcount > 0

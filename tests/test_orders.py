@@ -149,3 +149,85 @@ def test_sarvam_falls_back_to_plain_settings_on_400(tmp_path):
 
     assert asyncio.run(run()) == "abc ko 10 carton lux"
     assert sent == [True, False]
+
+
+def test_items_page_add_edit_delete_changes_matching():
+    items = client.get("/api/items").json()
+    assert len(items) == 20 and items[0]["code"] == "SP01"
+    # add a new item: speech now finds it
+    r = client.post("/api/items", json={"code": "kw01", "name": "Kurkure Masala", "unit": "carton",
+                                        "aliases": ["kurkure", " Kurkure ", "kurkre"]})
+    assert r.status_code == 201 and r.json()["code"] == "KW01" and r.json()["aliases"] == ["kurkure", "kurkre"]
+    assert client.post("/api/items", json={"code": "KW01", "name": "X", "unit": "carton"}).status_code == 409
+    d = client.post("/api/parse", json={"text": "Gupta ji ko 4 carton kurkure kal"}).json()
+    assert d["lines"][0]["item"]["code"] == "KW01"
+    # edit: rename + new code
+    r = client.put("/api/items/KW01", json={"code": "KW02", "name": "Kurkure Masala Munch", "unit": "packet",
+                                            "aliases": ["kurkure"]})
+    assert r.status_code == 200 and client.get("/api/items").json()[-1]["code"] == "KW02"
+    d = client.post("/api/parse", json={"text": "Gupta ji ko 4 kurkure kal"}).json()
+    assert d["lines"][0]["item"]["name"] == "Kurkure Masala Munch" and d["lines"][0]["unit"] == "packet"
+    # delete: no longer matched
+    assert client.delete("/api/items/KW02").status_code == 200
+    assert client.delete("/api/items/KW02").status_code == 404
+    d = client.post("/api/parse", json={"text": "Gupta ji ko 4 carton kurkure kal"}).json()
+    assert d["lines"][0]["item"] is None
+
+
+def test_items_validation():
+    bad = [{"code": "", "name": "A", "unit": "carton"}, {"code": "ABCDEFGHIJKLM", "name": "A", "unit": "carton"},
+           {"code": "Z1", "name": " ", "unit": "carton"}, {"code": "Z1", "name": "A", "unit": "tonne"},
+           {"code": "Z1", "name": "A", "unit": "carton", "group": "shampoo"}]
+    for b in bad:
+        assert client.post("/api/items", json=b).status_code == 400, b
+    assert client.put("/api/items/NOPE", json={"code": "N1", "name": "A", "unit": "carton"}).status_code == 404
+
+
+SAMSUNG_TRANSCRIPT = """Call with Gupta Kirana
+Speaker 1  00:00
+Hello, haan bhai Gupta ji bol rahe hain?
+Speaker 2  00:03
+Haan ji namaste. Order likh lo. 10 carton Lux sabun bhejna.
+Speaker 1  00:09
+10 carton Lux, theek hai. Aur?
+Speaker 2  00:12
+5 bori cheeni aur 3 carton Tata namak. Rate pichli baar wala hi lagana.
+Speaker 1  00:20
+Haan haan. Kab chahiye?
+Speaker 2  00:22
+Kal subah tak bhej dena."""
+
+
+def _lines(d):
+    return [(l["qty"], l["unit"], l["item"]["code"] if l["item"] else None) for l in d["lines"]]
+
+
+def test_pasted_samsung_transcript():
+    d = client.post("/api/parse", json={"text": SAMSUNG_TRANSCRIPT, "kind": "transcript"}).json()
+    assert d["source"] == "transcript" and d["party"]["party"]["name"] == "Gupta Kirana"
+    assert d["delivery"]["label"] == "kal"
+    # the shop's repeat "10 carton Lux, theek hai" is not a second line; times and labels are gone
+    assert _lines(d) == [(10, "carton", "SP01"), (5, "bag", "SG01"), (3, "carton", "SL01")]
+    assert "speaker" not in d["heard"].lower() and "00:" not in d["heard"]
+    # detected even without kind
+    assert client.post("/api/parse", json={"text": SAMSUNG_TRANSCRIPT}).json()["source"] == "transcript"
+
+
+def test_pasted_transcript_other_formats():
+    from app.transcript import clean_transcript, looks_like_transcript
+    inline = "[00:01] Me: haan bolo\n[00:04] Jain Brothers: bhai 8 carton Maggi aur 2 bag atta bhej do\n" \
+             "[00:10] Me: 8 carton Maggi, 2 bag atta. Kab?\n[00:13] Jain Brothers: parso"
+    c = clean_transcript(inline)
+    assert c["names"] == ["Jain Brothers"] and "Me:" not in c["text"] and "00:" not in c["text"]
+    d = build_draft(c["text"])
+    assert d["party"]["party"]["name"] == "Jain Brothers" and d["delivery"]["label"] == "parso"
+    assert _lines(d) == [(8, "carton", "MG01"), (2, "bag", "AT01")]
+    ai = "Shopkeeper: Namaste, boliye.\nCustomer (0:05): ABC Traders se bol raha hoon. 6 carton Parle-G aur 4 carton Surf Excel.\n" \
+         "Shopkeeper (0:11): 6 Parle-G, 4 Surf. Kal?\nCustomer (0:14): Haan kal."
+    d = build_draft(clean_transcript(ai)["text"])
+    assert _lines(d) == [(6, "carton", "BS01"), (4, "carton", "DT01")] and d["party"]["party"]["code"] == "P01"
+    phone = "+91 98765 43210  10:32 AM\nBittu bhai, 12 packet maachis aur 2 carton ghee.\nYou  10:33 AM\n12 packet maachis, 2 carton ghee."
+    c = clean_transcript(phone)
+    assert "98765" not in c["text"] and _lines(build_draft(c["text"])) == [(12, "packet", "MC01"), (2, "carton", "GH01")]
+    # an ordinary spoken order is not treated as a transcript
+    assert not looks_like_transcript("ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena")

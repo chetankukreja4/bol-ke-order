@@ -8,14 +8,22 @@ Rules (all in plain code):
 from rapidfuzz import fuzz
 
 from .catalog import (AMBIGUOUS_PARTY_WORDS, CATALOG, GROUP_LABEL, GROUP_WORDS,
-                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE)
+                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change)
 from .textnorm import norm
 
 STRONG = 88
 WEAK = 55
 LEAD = 8
 
-_ITEM_INDEX = [(norm(a), it["code"]) for it in CATALOG for a in it["aliases"] + [it["name"]]]
+_ITEM_INDEX = []
+
+
+@on_items_change
+def rebuild_item_index():
+    _ITEM_INDEX[:] = [(norm(a), it["code"]) for it in CATALOG for a in it["aliases"] + [it["name"]] if norm(a)]
+
+
+rebuild_item_index()
 _PARTY_INDEX = [(norm(a), p["code"]) for p in PARTIES for a in p["aliases"] + [p["name"]]]
 _GROUP_INDEX = {norm(w): g for g, words in GROUP_WORDS.items() for w in words}
 
@@ -70,6 +78,8 @@ def match_item(phrase: str):
     if not tokens:
         return {"status": "missing", "item": None, "options": [], "group": None}
     ranked = _ranked(phrase, _ITEM_INDEX)
+    if not ranked:
+        return {"status": "unknown", "item": None, "options": [], "group": None}
     top_code, top = ranked[0]
     second = ranked[1][1] if len(ranked) > 1 else 0
 

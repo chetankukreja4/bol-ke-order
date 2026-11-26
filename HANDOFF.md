@@ -8,7 +8,7 @@ A voice-first prototype for **Build for Bharat (Scaler × Flow), Round 2**: "bui
 
 Problem (from Round 1): in Indian wholesale shops, phone orders are written on a parchi and typed again into billing software (Busy). It is slow, and wrong items or quantities cause returns and a second dispatch. One wholesaler we interviewed gets about 20 phone orders a day and has agreed to test the prototype.
 
-What it does: staff speak the order in Hinglish, or upload the customer's call recording / WhatsApp voice note. The app shows what it heard next to what it understood, reads the order back, asks one question at a time about anything unclear, and saves only after "haan, pakka". It then prints a parchi and gives a CSV for Busy. Dispatch is also recorded by voice.
+What it does: staff speak the order in Hinglish, upload the customer's call recording / WhatsApp voice note, or paste a call transcript (from the phone's own call transcript, e.g. Samsung, or any AI app). The app shows what it heard next to what it understood, reads the order back, asks one question at a time about anything unclear, and saves only after "haan, pakka". It then prints a parchi and gives a CSV for Busy. Dispatch is also recorded by voice.
 
 ## 2. Where things are
 
@@ -59,17 +59,18 @@ Main rules (from the spec):
 
 | File | What it does |
 |---|---|
-| `app/main.py` | FastAPI routes: `/api/config`, `/api/transcribe`, `/api/parse`, `/api/answer`, `/api/orders` (+ CSV), `/api/dispatch/*`, `/healthz`, and the static page |
+| `app/main.py` | FastAPI routes: `/api/config`, `/api/transcribe`, `/api/parse`, `/api/answer`, `/api/orders` (+ CSV), `/api/dispatch/*`, `/api/items` (list, add, edit, remove), `/healthz`, and the static page |
 | `app/textnorm.py` | Devanagari → Roman, spelling clean-up, spoken numbers (das, dus, ten, pachees, do sau, दस) |
-| `app/catalog.py` | 20 sample items with Hinglish aliases, 7 parties, units, dispatch modes |
+| `app/catalog.py` | 20 sample items (seed for the Items page) with Hinglish aliases, 7 parties, units, dispatch modes. `replace_items()` swaps the live item list |
 | `app/matcher.py` | RapidFuzz item and party matching, brand groups, picking an option from an answer |
 | `app/parser.py` | Rule-based extraction (no key needed), dates, confirm/correction words, dispatch parsing |
 | `app/dialog.py` | Draft order, read-back text, next question, applying answers and corrections, save checks |
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
-| `app/db.py` | SQLite `orders` table |
+| `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
+| `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
-| `static/` | `index.html`, `app.js` (mic, TTS, screens), `style.css` (light + dark theme) |
-| `tests/test_orders.py` | 35 tests |
+| `static/` | `index.html` (4 tabs: Order, Orders, Dispatch, Items), `app.js` (mic, TTS, pages, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones) |
+| `tests/test_orders.py` | 39 tests |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -77,7 +78,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 35 tests (inside .venv or the container)
+pytest -q                          # 39 tests (inside .venv or the container)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -89,7 +90,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 35 tests pass (numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, dispatch, "key not set").
+- 39 tests pass (numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, dispatch, "key not set").
 - Full flow in a browser at phone size: sample phrase → brand question → correction → confirm → parchi → dispatch. Both light and dark themes.
 - ffmpeg chunking: a 70 s file becomes 3 chunks.
 - The server start command and health check work.
@@ -102,7 +103,7 @@ Not checked yet:
 
 ## 8. Known limits and next steps
 
-- Catalog and parties are hard-coded sample data. Next: load the pilot shop's real item list (CSV import).
+- Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are still hard-coded sample data. Next: CSV import of the pilot shop's item list, and a Parties page.
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
 - On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
 - No login, one shop only, no dues or payments module (kept out on purpose).

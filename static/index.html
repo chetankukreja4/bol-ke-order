@@ -15,59 +15,76 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
 <header class="top no-print">
-  <div class="brand" id="goHome">Bol-ke-Order <span>बोल के ऑर्डर</span></div>
+  <a class="brand" href="#order" id="goHome">Bol-ke-Order</a>
   <div class="top-right">
     <div id="pills" class="pills"></div>
     <button id="themeBtn" class="theme-btn" aria-label="Switch to dark theme" title="Light / dark theme">🌙</button>
   </div>
 </header>
 
+<nav class="tabs no-print" aria-label="Pages">
+  <a href="#order" data-tab="order" class="tab"><span class="tab-ic">🎤</span><span>Order</span></a>
+  <a href="#orders" data-tab="orders" class="tab"><span class="tab-ic">📋</span><span>Orders</span></a>
+  <a href="#dispatch" data-tab="dispatch" class="tab"><span class="tab-ic">🚚</span><span>Dispatch</span></a>
+  <a href="#items" data-tab="items" class="tab"><span class="tab-ic">📦</span><span>Items</span></a>
+</nav>
+
 <main>
-<!-- HOME -->
-<section id="screen-home" class="screen active">
+<!-- ============================== ORDER (new order) -->
+<section id="screen-order" class="screen" data-tab="order">
   <button id="micOrder" class="mic-big" aria-label="Hold and speak the order">
     <span class="mic-icon">🎤</span>
     <span class="mic-label">Order bolo</span>
     <span class="mic-hint">Hold to speak · or tap once</span>
   </button>
-  <div id="liveText" class="live"></div>
+  <div id="liveText" class="live" aria-live="polite"></div>
 
-  <label class="btn btn-outline upload">
-    <input id="fileInput" type="file" accept=".m4a,.ogg,.oga,.opus,.mp3,.wav,.webm,.aac,audio/*" hidden>
-    ⬆ Upload call recording or voice note
-  </label>
+  <div class="grid-tiles">
+    <label class="tile">
+      <input id="fileInput" type="file" accept=".m4a,.ogg,.oga,.opus,.mp3,.wav,.webm,.aac,audio/*" hidden>
+      <span class="tile-ic">⬆</span>
+      <span><b>Upload recording</b><small>Call recording or WhatsApp voice note</small></span>
+    </label>
+    <button class="tile" id="pasteOpen" type="button">
+      <span class="tile-ic">📋</span>
+      <span><b>Paste call transcript</b><small>From your phone's call transcript or any AI app</small></span>
+    </button>
+    <button class="tile" id="typedOpen" type="button">
+      <span class="tile-ic">⌨</span>
+      <span><b>Type the order</b><small>When it is too noisy to speak</small></span>
+    </button>
+  </div>
   <p class="note">⚠ Recording a customer's call needs their consent. Ask them first.</p>
 
-  <details class="card">
-    <summary>Type the order instead</summary>
+  <div id="pasteCard" class="card hidden">
+    <h3>Paste call transcript</h3>
+    <p class="sub">Copy the call's text and paste it here. It can come from the phone's own call transcript (for example Samsung: open the call recording → Transcript → Copy) or from any AI app. Speaker names and times are removed for you, and lines the shop repeats back are counted once.</p>
+    <textarea id="pasted" rows="8" placeholder="Speaker 1  00:03&#10;Haan ji, 10 carton Lux bhejna&#10;Speaker 2  00:07&#10;10 carton Lux, theek hai. Kab chahiye?&#10;Speaker 1  00:10&#10;Kal tak"></textarea>
+    <div class="actions">
+      <button id="pasteClip" class="btn btn-outline hidden" type="button">📋 Paste from clipboard</button>
+      <button id="pasteGo" class="btn" type="button">Samjho →</button>
+    </div>
+  </div>
+
+  <div id="typedCard" class="card hidden">
+    <h3>Type the order</h3>
     <textarea id="typed" rows="3" placeholder="ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena"></textarea>
     <button id="typedGo" class="btn">Samjho →</button>
-  </details>
+  </div>
 
   <details class="card">
-    <summary>Try sample phrases (10)</summary>
+    <summary>Try sample phrases <span class="count" id="samplesCount"></span></summary>
     <div id="samples" class="chips"></div>
   </details>
-
-  <div class="card">
-    <div class="row-between"><h3>Dispatch</h3></div>
-    <button id="micDispatch" class="btn btn-dark big">🎤 Dispatch bolo <small>"ABC ka maal gaya, rickshaw se"</small></button>
-    <div id="dispatchBox" class="dispatch hidden"></div>
-  </div>
-
-  <div class="card">
-    <div class="row-between"><h3>Recent orders</h3><a class="link" href="/api/orders.csv">CSV review sheet</a></div>
-    <div id="orders" class="orders"></div>
-  </div>
 </section>
 
-<!-- TRANSCRIPT -->
-<section id="screen-transcript" class="screen">
-  <h2>Heard text</h2>
+<!-- order flow: heard text -->
+<section id="screen-transcript" class="screen" data-tab="order">
+  <div class="page-h"><h2>Heard text</h2><span class="step">Step 1 of 3</span></div>
   <div id="trStatus" class="status"></div>
   <textarea id="trText" rows="5"></textarea>
   <audio id="trAudio" controls class="hidden"></audio>
@@ -78,8 +95,9 @@
   </div>
 </section>
 
-<!-- CONFIRM -->
-<section id="screen-confirm" class="screen">
+<!-- order flow: check and confirm -->
+<section id="screen-confirm" class="screen" data-tab="order">
+  <div class="page-h"><h2>Check the order</h2><span class="step">Step 2 of 3</span></div>
   <div class="compare">
     <div class="col"><div class="col-h">Heard</div><div id="cfHeard" class="heard"></div></div>
     <div class="col"><div class="col-h">Understood</div><div id="cfParty" class="party"></div><div id="cfDate" class="date"></div></div>
@@ -88,7 +106,7 @@
   <div id="cfQuestion" class="question hidden"></div>
   <div id="cfSay" class="say"></div>
   <button id="micAnswer" class="mic-mid">🎤 <span>Jawab bolo</span></button>
-  <div id="answerLive" class="live"></div>
+  <div id="answerLive" class="live" aria-live="polite"></div>
   <details class="card small">
     <summary>Type answer</summary>
     <div class="row"><input id="ansTyped" placeholder="lux / nahi, aath carton / haan pakka"><button id="ansGo" class="btn">OK</button></div>
@@ -99,9 +117,9 @@
   </div>
 </section>
 
-<!-- DONE -->
-<section id="screen-done" class="screen">
-  <div class="saved no-print">✔ Order saved</div>
+<!-- order flow: saved / parchi -->
+<section id="screen-done" class="screen" data-tab="order">
+  <div id="dnTitle" class="saved no-print">✔ Order saved</div>
   <div id="parchi" class="parchi"></div>
   <div class="actions no-print">
     <button id="dnPrint" class="btn btn-outline">🖨 Print parchi</button>
@@ -109,8 +127,63 @@
     <button id="dnNew" class="btn">+ New order</button>
   </div>
 </section>
+
+<!-- ============================== ORDERS -->
+<section id="screen-orders" class="screen" data-tab="orders">
+  <div class="page-h">
+    <h2>Orders</h2>
+    <a class="btn btn-outline btn-sm" href="/api/orders.csv">⬇ CSV review sheet</a>
+  </div>
+  <div class="seg" id="ordFilter" role="tablist">
+    <button data-f="all" class="on">All</button>
+    <button data-f="confirmed">Pending</button>
+    <button data-f="dispatched">Dispatched</button>
+  </div>
+  <div id="orders" class="list"></div>
+</section>
+
+<!-- ============================== DISPATCH -->
+<section id="screen-dispatch" class="screen" data-tab="dispatch">
+  <div class="page-h"><h2>Dispatch</h2></div>
+  <button id="micDispatch" class="mic-mid dark">🎤 <span>Dispatch bolo</span></button>
+  <p class="hint-c">"ABC ka maal gaya, rickshaw se"</p>
+  <div id="dispatchBox" class="dispatch hidden" aria-live="polite"></div>
+  <h3 class="sec-h">Waiting to go <span class="count" id="pendingCount"></span></h3>
+  <div id="pending" class="list"></div>
+</section>
+
+<!-- ============================== ITEMS -->
+<section id="screen-items" class="screen" data-tab="items">
+  <div class="page-h">
+    <h2>Items <span class="count" id="itemsCount"></span></h2>
+    <button id="itemAdd" class="btn btn-sm">+ Add item</button>
+  </div>
+  <p class="sub">The app only matches what people say to items on this list. Add the names customers really use ("sarson ka tel", "parle") as spoken names.</p>
+  <input id="itemSearch" type="search" placeholder="Search by name, code or spoken name" autocomplete="off">
+  <div id="itemsList" class="list"></div>
+</section>
 </main>
-<div id="toast" class="toast hidden"></div>
-<script src="/static/app.js"></script>
+
+<!-- add / edit item -->
+<dialog id="itemDlg" class="dlg">
+  <form id="itemForm" method="dialog" novalidate>
+    <div class="page-h"><h2 id="itemDlgTitle">Add item</h2><button type="button" class="x" id="itemClose" aria-label="Close">✕</button></div>
+    <div class="form-grid">
+      <label>Item code<input id="fCode" name="code" maxlength="12" placeholder="SP04" autocomplete="off" required></label>
+      <label>Unit<select id="fUnit" name="unit"></select></label>
+    </div>
+    <label>Item name<input id="fName" name="name" maxlength="80" placeholder="Santoor Soap" autocomplete="off" required></label>
+    <label>Group <small>(optional: a general word like "sabun" asks which of the group)</small><select id="fGroup" name="group"></select></label>
+    <label>Spoken names <small>(comma separated)</small><textarea id="fAliases" name="aliases" rows="3" placeholder="santoor, santur, santoor sabun"></textarea></label>
+    <div id="fErr" class="status bad hidden"></div>
+    <div class="actions">
+      <button type="button" id="itemDelete" class="btn btn-danger hidden">🗑 Remove</button>
+      <button type="submit" id="itemSave" class="btn">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden" role="status"></div>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

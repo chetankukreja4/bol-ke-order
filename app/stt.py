@@ -42,15 +42,12 @@ def _keyterms():
     return out[:50]
 
 
-KEYTERMS = _keyterms()
-
-
 def _form(minimal=False):
     data = {"model": SARVAM_MODEL, "language_code": SARVAM_LANG}
     if not minimal and SARVAM_MODEL.startswith("saaras"):
         data["mode"] = SARVAM_MODE
         if SARVAM_MODEL == "saaras:v4":
-            data["keyterms"] = json.dumps(KEYTERMS)
+            data["keyterms"] = json.dumps(_keyterms())  # follows the Items page
     return data
 CHUNK_SECONDS = 25
 MAX_SECONDS = 10 * 60 + 5

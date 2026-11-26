@@ -72,6 +72,7 @@ def norm(text: str) -> str:
     """One spelling for many: lower case, Roman script, collapsed vowels/doubles."""
     t = deva_to_roman(text) if has_devanagari(text) else text
     t = t.lower()
+    t = re.sub(r"(?<=[a-z])-(?=[a-z0-9])", " ", t)  # parle-g -> parle g
     t = re.sub(r"[^a-z0-9.\s-]", " ", t)
     t = t.replace("ee", "i").replace("oo", "u")
     t = re.sub(r"([a-z])\1+", r"\1", t)  # aath->ath, pachchees->pachis, dass->das

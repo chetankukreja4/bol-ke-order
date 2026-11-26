@@ -37,6 +37,7 @@ def make_line(raw):
         "qty": vals[0] if len(vals) == 1 else None,
         "qty_alts": vals if len(vals) > 1 else [],
         "unit": raw["unit"] or (m["item"]["unit"] if m["item"] else None),
+        "heard_unit": bool(raw["unit"]),
     }
     return _refresh_line(line)
 
@@ -48,6 +49,20 @@ def _refresh_line(line):
     return line
 
 
+def _merge_repeats(lines):
+    """On a call the shop repeats the order back ("10 carton Lux, theek hai").
+    The same item with the same quantity and unit is one line, not two."""
+    out, seen = [], {}
+    for ln in lines:
+        key = (ln["item"]["code"], ln["qty"]) if ln["item"] and ln["qty"] is not None else None
+        if key and key in seen and (ln["unit"] == seen[key] or not ln["heard_unit"]):
+            continue  # same item + qty; a repeat without a unit ("6 Parle-G") counts too
+        if key:
+            seen[key] = ln["unit"]
+        out.append(ln)
+    return out
+
+
 def build_draft(transcript: str):
     data = extract_rules(transcript)
     draft = {
@@ -55,7 +70,7 @@ def build_draft(transcript: str):
         "party": {"status": data["party"]["status"], "party": data["party"]["party"],
                   "options": data["party"]["options"]},
         "delivery": data["delivery"],
-        "lines": [make_line(r) for r in data["lines"]],
+        "lines": _merge_repeats([make_line(r) for r in data["lines"]]),
         "notice": None,
     }
     if not draft["lines"]:

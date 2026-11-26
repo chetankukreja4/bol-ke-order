@@ -85,7 +85,7 @@ One Docker container: build from the `Dockerfile`, port `8000` (or `$PORT`), HTT
 ```
 app/        FastAPI backend (main, dialog, parser, matcher, textnorm, stt, db, catalog, samples)
 static/     index.html, app.js, style.css (light + dark)
-tests/      pytest suite (35 tests)
+tests/      pytest suite (39 tests)
 Dockerfile, docker-compose.yml, render.yaml, .env.example
 HANDOFF.md  status, what is tested, next steps, demo and deck notes
 DEPLOY.md   how to host it

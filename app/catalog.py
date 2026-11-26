@@ -1,11 +1,15 @@
-"""Built-in sample catalog (20 items) and sample parties, with Hinglish aliases.
+"""Sample catalog (20 items) and sample parties, with Hinglish aliases.
+
+The item list lives in SQLite (Items page) and is seeded from SAMPLE_ITEMS on
+first start. CATALOG / ITEMS_BY_CODE always hold the current list; call
+replace_items() after a change so the matcher rebuilds its index.
 
 Each item has a `group` when the spoken word is generic (e.g. "sabun" could be
 any of three soaps). A generic word never picks a brand on its own; the app
 asks "Kaun sa soap brand?" instead.
 """
 
-CATALOG = [
+SAMPLE_ITEMS = [
     # code, name, default unit, group, aliases
     {"code": "SP01", "name": "Lux Soap", "unit": "carton", "group": "soap",
      "aliases": ["lux", "lux sabun", "lux soap", "laks"]},
@@ -88,7 +92,24 @@ DISPATCH_MODES = {
     "self pickup": ["khud", "khud le gaye", "pickup", "self"],
 }
 
+CATALOG = [dict(i, aliases=list(i["aliases"])) for i in SAMPLE_ITEMS]  # current items
 ITEMS_BY_CODE = {i["code"]: i for i in CATALOG}
+_on_change = []  # callbacks (matcher index rebuild)
+
+
+def on_items_change(fn):
+    _on_change.append(fn)
+    return fn
+
+
+def replace_items(items):
+    """Swap in a new item list in place, so every importer sees it."""
+    CATALOG[:] = items
+    ITEMS_BY_CODE.clear()
+    ITEMS_BY_CODE.update({i["code"]: i for i in items})
+    for fn in _on_change:
+        fn()
+
 PARTIES_BY_CODE = {p["code"]: p for p in PARTIES}
 
 

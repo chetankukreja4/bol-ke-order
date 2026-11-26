@@ -36,6 +36,7 @@ from .dialog import answer, build_draft, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
+from . import pilot
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
 MAX_UPLOAD = 30 * 1024 * 1024
@@ -54,6 +55,8 @@ class DispatchTextIn(BaseModel):
 class TextIn(BaseModel):
     text: str
     kind: str | None = None  # "transcript" = pasted call transcript
+    source: str | None = None  # mic | upload | transcript | typed (pilot numbers)
+    test: bool = False  # practice order: left out of the pilot numbers
 
 
 class AnswerIn(BaseModel):
@@ -178,8 +181,11 @@ def parse(body: TextIn):
         draft = build_draft(cleaned["text"])
         draft["source"] = "transcript"
         draft["turns"] = cleaned["turns"]
+        draft["stats"] = pilot.new_stats("transcript", draft, body.test)
         return draft
-    return build_draft(text)
+    draft = build_draft(text)
+    draft["stats"] = pilot.new_stats(body.source, draft, body.test)
+    return draft
 
 
 @app.post("/api/answer")

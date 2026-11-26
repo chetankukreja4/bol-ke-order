@@ -180,6 +180,12 @@ def _apply_correction(d, text):
     return d, False
 
 
+def _count(d, key):
+    """Pilot numbers; drafts from an old browser tab have no stats."""
+    if isinstance(d.get("stats"), dict):
+        d["stats"][key] = d["stats"].get(key, 0) + 1
+
+
 def answer(d, text: str):
     """Apply one spoken answer to the draft. Returns (draft, action).
 
@@ -199,6 +205,7 @@ def answer(d, text: str):
     if is_correction(text):
         d, ok = _apply_correction(d, text)
         if ok:
+            _count(d, "corrections")
             return finish(d), "updated"
         if d["say"].startswith("Kis item"):
             return d, "repeat"
@@ -245,6 +252,8 @@ def answer(d, text: str):
             d["delivery"] = dt
             handled = True
 
+    if handled:
+        _count(d, "questions")
     # extra items said in the answer ("aur 5 bori cheeni") are added as new lines
     if not handled:
         extra = extract_rules(text)

@@ -15,7 +15,7 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=11">
 </head>
 <body>
 <header class="top no-print">
@@ -163,8 +163,18 @@
     <button id="itemAdd" class="btn btn-sm">+ Add item</button>
   </div>
   <p class="sub">The app only matches what people say to items on this list. Add the names customers really use ("sarson ka tel", "parle") as spoken names.</p>
+  <div class="imports">
+    <label class="btn btn-outline btn-sm"><input id="impItems" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se items laayein</label>
+    <label class="btn btn-outline btn-sm"><input id="impParties" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se parties laayein</label>
+  </div>
+  <div id="impBox" class="card hidden" aria-live="polite"></div>
   <input id="itemSearch" type="search" placeholder="Search by name, code or spoken name" autocomplete="off">
   <div id="itemsList" class="list"></div>
+
+  <h3 class="sec-h">Parties <span class="count" id="partiesCount"></span></h3>
+  <p class="sub">Badalne ke liye Busy se nayi list laayein (Sundry Debtors).</p>
+  <input id="partySearch" type="search" placeholder="Search party" autocomplete="off">
+  <div id="partiesList" class="list"></div>
 </section>
 
 <!-- ============================== PILOT (numbers for the shop test) -->
@@ -204,6 +214,6 @@
 </dialog>
 
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=11"></script>
 </body>
 </html>

@@ -198,3 +198,6 @@ button.row-card:hover { border-color: var(--green); }
 .stat b { display: block; font-size: 24px; color: var(--outline-ink); }
 .stat span { display: block; color: var(--muted); font-size: 13px; line-height: 1.3; }
 #pilotMore div { margin: 4px 0; }
+.imports { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.imports label { cursor: pointer; }
+#impBox ul { margin: 6px 0; padding-left: 20px; }

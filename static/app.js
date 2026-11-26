@@ -590,11 +590,64 @@ function initItems() {
   $('itemClose').onclick = () => $('itemDlg').close();
   $('itemForm').onsubmit = (e) => { e.preventDefault(); saveItem(); };
   $('itemDelete').onclick = deleteItem;
+  $('partySearch').addEventListener('input', renderParties);
+  [['impItems', 'items'], ['impParties', 'parties']].forEach(([id, kind]) => $(id).onchange = (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) previewImport(kind, f);
+  });
 }
 
 async function loadItems() {
   try { state.items = await api('/api/items'); } catch (_) { state.items = null; }
   renderItems();
+  try { state.parties = await api('/api/parties'); } catch (_) { state.parties = null; }
+  renderParties();
+}
+
+function renderParties() {
+  const box = $('partiesList');
+  if (!state.parties) { box.innerHTML = empty('Could not load parties (offline?).'); return; }
+  const q = $('partySearch').value.trim().toLowerCase();
+  const rows = state.parties.filter((p) => !q || [p.code, p.name, ...p.aliases].some((t) => t.toLowerCase().includes(q)));
+  $('partiesCount').textContent = state.parties.length;
+  box.innerHTML = rows.length ? rows.map((p) => `<div class="row-card static">
+      <span class="code">${esc(p.code)}</span>
+      <div class="rc-main"><b>${esc(p.name)}</b><small class="muted">${esc(p.aliases.join(', '))}</small></div>
+    </div>`).join('') : empty(q ? `No party matches "${esc(q)}".` : 'No parties yet.');
+}
+
+// Busy import: first a preview, then "haan" replaces the whole list.
+const IMPORT_LABEL = { items: 'items', parties: 'parties' };
+async function previewImport(kind, file) {
+  const box = $('impBox');
+  box.classList.remove('hidden');
+  box.innerHTML = 'File padh rahe hain…';
+  const send = (commit) => {
+    const fd = new FormData(); fd.append('file', file, file.name);
+    return api(`/api/${kind}/import${commit ? '?commit=1' : ''}`, { method: 'POST', body: fd });
+  };
+  let p;
+  try { p = await send(false); } catch (e) {
+    box.innerHTML = `<div class="status bad">${esc(e.network ? 'Network nahi hai' : e.message)}</div>`; return;
+  }
+  const skipped = p.skipped.length ? `<details><summary>${p.skipped.length} line(s) chhodi</summary><ul>${
+    p.skipped.slice(0, 50).map((s) => `<li>Line ${s.row}: ${esc(s.name || '(khaali)')} — ${esc(s.reason)}</li>`).join('')}</ul></details>` : '';
+  const names = p.sample.map((x) => `<li>${esc(x.name)}${x.unit ? ` <small>(${esc(x.unit)})</small>` : ''}</li>`).join('');
+  box.innerHTML = `<b>${p.count} ${IMPORT_LABEL[kind]} mile</b> <small>(${p.total_rows} lines mein se)</small>
+    <ul>${names}</ul>${p.count > 10 ? `<small>…aur ${p.count - 10}</small>` : ''}${skipped}
+    ${p.count ? `<div class="actions"><button class="btn btn-outline" id="impNo">Rehne do</button>
+      <button class="btn" id="impYes">Haan, purani list hata kar ye daalein</button></div>` : '<div class="status bad">Is file mein kuch nahi mila.</div>'}`;
+  if (!p.count) return;
+  $('impNo').onclick = () => box.classList.add('hidden');
+  $('impYes').onclick = async () => {
+    try {
+      const r = await send(true);
+      box.classList.add('hidden');
+      toast(`${r.count} ${IMPORT_LABEL[kind]} daal diye`);
+      try { state.cfg = await api('/api/config'); } catch (_) {}
+      loadItems();
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message, 4000); }
+  };
 }
 
 function renderItems() {

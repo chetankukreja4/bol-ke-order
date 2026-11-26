@@ -4,13 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14532d">
+<meta name="color-scheme" content="light dark">
 <title>Bol-ke-Order</title>
+<script>
+  // Pick the theme before the page paints: saved choice, else the phone's setting.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('bko-theme'); } catch (e) {}
+    if (t !== 'dark' && t !== 'light') t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header class="top no-print">
   <div class="brand" id="goHome">Bol-ke-Order <span>बोल के ऑर्डर</span></div>
-  <div id="pills" class="pills"></div>
+  <div class="top-right">
+    <div id="pills" class="pills"></div>
+    <button id="themeBtn" class="theme-btn" aria-label="Switch to dark theme" title="Light / dark theme">🌙</button>
+  </div>
 </header>
 
 <main>

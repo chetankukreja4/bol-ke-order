@@ -333,6 +333,24 @@ async function doDispatch() {
   } catch (e) { toast(e.message); }
 }
 
+// ------------------------------------------------------------------ theme
+function applyTheme(t, save) {
+  document.documentElement.setAttribute('data-theme', t);
+  const b = $('themeBtn');
+  b.textContent = t === 'dark' ? '☀' : '🌙';
+  b.setAttribute('aria-label', t === 'dark' ? 'Switch to light theme' : 'Switch to dark theme');
+  if (save) { try { localStorage.setItem('bko-theme', t); } catch (_) {} }
+}
+function initTheme() {
+  applyTheme(document.documentElement.getAttribute('data-theme') || 'light', false);
+  $('themeBtn').onclick = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark', true);
+  const mq = window.matchMedia && matchMedia('(prefers-color-scheme: dark)');
+  mq && mq.addEventListener && mq.addEventListener('change', (e) => {
+    let saved = null; try { saved = localStorage.getItem('bko-theme'); } catch (_) {}
+    if (!saved) applyTheme(e.matches ? 'dark' : 'light', false); // follow the phone until the user picks
+  });
+}
+
 // ------------------------------------------------------------------ misc
 async function loadOrders() {
   try {
@@ -343,6 +361,7 @@ async function loadOrders() {
 }
 
 async function init() {
+  initTheme();
   try { state.cfg = await api('/api/config'); } catch (_) { state.cfg = { test_phrases: [] }; }
   const c = state.cfg;
   $('pills').innerHTML = [

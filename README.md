@@ -56,6 +56,8 @@ upload m4a/ogg/mp3 ─► ffmpeg 25s chunks ─► Sarvam STT ─┤
 
 ## Screens
 
+Light and dark theme: follows the phone setting, with a 🌙/☀ button in the header to switch (remembered on the device).
+
 Home (Order bolo, upload, dispatch, recent orders) → Transcript (heard text, editable) → Confirm (heard vs understood, question, voice answer) → Done (printable parchi, CSV).
 
 Dispatch by voice: "ABC ka maal gaya, rickshaw se" → read back → "haan pakka" → order marked dispatched with mode and today's date.

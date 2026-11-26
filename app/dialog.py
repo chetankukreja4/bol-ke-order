@@ -1,0 +1,262 @@
+"""Order draft, read-back and one-question-at-a-time dialog.
+
+The server is stateless: the browser keeps the draft JSON and sends it back
+with each spoken answer. Every function here is plain code (no LLM).
+"""
+import uuid
+
+from .catalog import ITEMS_BY_CODE, PARTIES
+from .matcher import choose_from, find_party, group_label, item_option, match_item, party_option
+from .parser import extract_rules, is_confirm, is_correction, parse_date
+from .textnorm import norm, numbers_in, readable
+
+
+
+
+def _fmt_qty(v):
+    return str(int(v)) if float(v).is_integer() else str(v)
+
+
+def _short(name):
+    """'Fortune Refined Oil 1L' -> 'Fortune Refined Oil' for speaking."""
+    words = [w for w in name.split() if not any(ch.isdigit() for ch in w)]
+    return " ".join(words) or name
+
+
+def make_line(raw):
+    m = match_item(raw["item_text"])
+    vals = list(dict.fromkeys(raw["qty_values"]))
+    line = {
+        "id": uuid.uuid4().hex[:8],
+        "heard": raw["heard"],
+        "item_text": raw["item_text"],
+        "match": m["status"],
+        "item": m["item"],
+        "options": m["options"],
+        "group": m["group"],
+        "qty": vals[0] if len(vals) == 1 else None,
+        "qty_alts": vals if len(vals) > 1 else [],
+        "unit": raw["unit"] or (m["item"]["unit"] if m["item"] else None),
+    }
+    return _refresh_line(line)
+
+
+def _refresh_line(line):
+    line["uncertain"] = line["match"] != "ok" or line["qty"] is None
+    if line["item"] and not line["unit"]:
+        line["unit"] = line["item"]["unit"]
+    return line
+
+
+def build_draft(transcript: str, extracted=None):
+    data = extracted or extract_rules(transcript)
+    draft = {
+        "heard": readable(transcript),
+        "party": {"status": data["party"]["status"], "party": data["party"]["party"],
+                  "options": data["party"]["options"]},
+        "delivery": data["delivery"],
+        "lines": [make_line(r) for r in data["lines"]],
+        "notice": None,
+    }
+    if not draft["lines"]:
+        draft["notice"] = "unclear"
+    return finish(draft)
+
+
+# ------------------------------------------------------------- questions
+def next_question(d):
+    p = d["party"]
+    if p["status"] == "choose":
+        names = " ya ".join(o["name"] for o in p["options"][:3])
+        return {"type": "party", "line_id": None, "options": p["options"],
+                "text": f"Kaun sa party? {names}?"}
+    if p["status"] != "ok":
+        return {"type": "party", "line_id": None, "options": [party_option(x["code"]) for x in PARTIES],
+                "text": "Order kis party ka hai?"}
+    for ln in d["lines"]:
+        if ln["match"] == "choose":
+            return {"type": "item", "line_id": ln["id"], "options": ln["options"],
+                    "text": f"Kaun sa {group_label(ln['group'])} brand?"}
+        if ln["match"] in ("unsure", "unknown", "missing"):
+            names = ", ".join(_short(o["name"]) for o in ln["options"][:3])
+            said = ln["item_text"] or "ye item"
+            return {"type": "item", "line_id": ln["id"], "options": ln["options"][:3],
+                    "text": f"Pakka nahi hoon. '{said}' matlab {names}?"}
+    for ln in d["lines"]:
+        if ln["qty_alts"]:
+            alts = " ya ".join(_fmt_qty(v) for v in ln["qty_alts"])
+            return {"type": "qty", "line_id": ln["id"], "options": [],
+                    "text": f"{_short(ln['item']['name'])} {alts} {ln['unit'] or ''}? Kitna?".replace("  ", " ")}
+        if ln["qty"] is None or ln["qty"] <= 0:
+            return {"type": "qty", "line_id": ln["id"], "options": [],
+                    "text": f"{_short(ln['item']['name'])} kitna chahiye?"}
+    if not d["delivery"]:
+        return {"type": "date", "line_id": None, "options": [], "text": "Delivery kab? Aaj, kal ya parso?"}
+    return None
+
+
+def readback(d):
+    parts = []
+    if d["party"]["status"] == "ok":
+        parts.append(d["party"]["party"]["name"])
+    for ln in d["lines"]:
+        q = _fmt_qty(ln["qty"]) if ln["qty"] is not None else " ya ".join(map(_fmt_qty, ln["qty_alts"])) or "?"
+        what = _short(ln["item"]["name"]) if ln["item"] else (group_label(ln["group"]) if ln["group"] else ln["item_text"] or "?")
+        parts.append(f"{q} {ln['unit'] or ''} {what}".replace("  ", " ").strip())
+    if d["delivery"]:
+        parts.append(f"delivery {d['delivery']['label']}")
+    return ", ".join(parts) + "." if parts else ""
+
+
+def finish(d):
+    if d.get("notice") == "unclear":
+        d["question"] = None
+        d["readback"] = ""
+        d["say"] = "Awaaz saaf nahi aayi, dobara bolein."
+        d["ready"] = False
+        return d
+    d["question"] = next_question(d)
+    d["readback"] = readback(d)
+    d["ready"] = d["question"] is None and bool(d["lines"])
+    tail = d["question"]["text"] if d["question"] else "Sahi hai? Haan pakka bolein."
+    d["say"] = f"{d['readback']} {tail}".strip()
+    return d
+
+
+# ---------------------------------------------------------------- answers
+def _line(d, line_id):
+    return next((l for l in d["lines"] if l["id"] == line_id), None)
+
+
+def _set_qty(line, values):
+    vals = list(dict.fromkeys(values))
+    line["qty"], line["qty_alts"] = (vals[0], []) if len(vals) == 1 else (None, vals)
+    _refresh_line(line)
+
+
+def _apply_correction(d, text):
+    """'nahi, aath carton' / 'nahi, lux 8 carton' changes only that one line."""
+    nums = numbers_in(" ".join(norm(text).split()[1:]))
+    rest = extract_rules(text)
+    target = None
+    named = [r for r in rest["lines"] if r["item_text"]]
+    if named:
+        m = match_item(named[0]["item_text"])
+        code = m["item"]["code"] if m["item"] else None
+        target = next((l for l in d["lines"] if l["item"] and l["item"]["code"] == code), None)
+        if target is None and m["group"]:
+            target = next((l for l in d["lines"] if l["group"] == m["group"]), None)
+    if target is None and d.get("question") and d["question"].get("line_id"):
+        target = _line(d, d["question"]["line_id"])
+    if target is None and d.get("last_line_id"):
+        target = _line(d, d["last_line_id"])
+    if target is None and len(d["lines"]) == 1:
+        target = d["lines"][0]
+    if target is None:
+        d["say"] = "Kis item ki quantity badalni hai? Item ka naam bolein."
+        return d, False
+    if nums:
+        _set_qty(target, [nums[-1]])
+        d["last_line_id"] = target["id"]
+        if rest["lines"] and rest["lines"][0]["unit"]:
+            target["unit"] = rest["lines"][0]["unit"]
+        return d, True
+    return d, False
+
+
+def answer(d, text: str):
+    """Apply one spoken answer to the draft. Returns (draft, action).
+
+    action: "confirm" (save now), "updated", or "repeat" (didn't understand).
+    """
+    text = readable(text or "").strip()
+    d["notice"] = None
+    if not text:
+        d["say"] = "Awaaz saaf nahi aayi, dobara bolein."
+        return d, "repeat"
+    if is_confirm(text) and not is_correction(text):
+        finish(d)
+        if d["ready"]:
+            return d, "confirm"
+        d["say"] = f"Pehle ye batayein: {d['question']['text']}"
+        return d, "repeat"
+    if is_correction(text):
+        d, ok = _apply_correction(d, text)
+        if ok:
+            return finish(d), "updated"
+        if d["say"].startswith("Kis item"):
+            return d, "repeat"
+
+    q = d.get("question") or next_question(d)
+    handled = False
+    if q and q["type"] == "item":
+        line = _line(d, q["line_id"])
+        pick = choose_from(text, q["options"], "item")
+        if pick is None:
+            m = match_item(text)
+            if m["status"] == "ok":
+                pick = m["item"]
+        if pick and line:
+            line["item"], line["match"], line["options"] = item_option(pick["code"]), "ok", []
+            line["unit"] = line["unit"] or ITEMS_BY_CODE[pick["code"]]["unit"]
+            nums = numbers_in(text)
+            if nums:  # "Lux, 12 carton"
+                _set_qty(line, nums)
+            _refresh_line(line)
+            d["last_line_id"] = line["id"]
+            handled = True
+    elif q and q["type"] == "qty":
+        nums = numbers_in(text)
+        line = _line(d, q["line_id"])
+        if nums and line:
+            _set_qty(line, nums if len(set(nums)) > 1 else [nums[0]])
+            d["last_line_id"] = line["id"]
+            handled = True
+    elif q and q["type"] == "party":
+        pick = choose_from(text, q["options"], "party")
+        if pick is None:
+            res, _ = find_party(text)
+            pick = res["party"] if res["status"] == "ok" else None
+            if res["status"] == "choose":
+                d["party"] = {"status": "choose", "party": None, "options": res["options"]}
+                return finish(d), "updated"
+        if pick:
+            d["party"] = {"status": "ok", "party": pick, "options": []}
+            handled = True
+    elif q and q["type"] == "date":
+        dt = parse_date(text)
+        if dt:
+            d["delivery"] = dt
+            handled = True
+
+    # extra items said in the answer ("aur 5 bori cheeni") are added as new lines
+    if not handled:
+        extra = extract_rules(text)
+        if extra["lines"]:
+            d["lines"].extend(make_line(r) for r in extra["lines"])
+            handled = True
+        if extra["delivery"] and not d["delivery"]:
+            d["delivery"], handled = extra["delivery"], True
+    if not handled:
+        finish(d)
+        d["say"] = f"Samjha nahi. {d['question']['text'] if d['question'] else 'Haan pakka bolein.'}"
+        return d, "repeat"
+    return finish(d), "updated"
+
+
+def validate_for_save(d):
+    """Server-side check before saving. Returns error text or None."""
+    if d.get("party", {}).get("status") != "ok":
+        return "Party not confirmed"
+    if not d.get("lines"):
+        return "No items"
+    for ln in d["lines"]:
+        if not ln.get("item") or ln.get("match") != "ok":
+            return f"Item not confirmed: {ln.get('item_text')}"
+        if ln.get("qty") is None or ln.get("qty_alts") or float(ln["qty"]) <= 0:
+            return f"Quantity not confirmed: {ln['item']['name']}"
+        if ln["item"]["code"] not in ITEMS_BY_CODE:
+            return "Unknown item code"
+    if not d.get("delivery"):
+        return "Delivery date missing"
+    return None

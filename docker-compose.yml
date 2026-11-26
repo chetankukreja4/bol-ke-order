@@ -1,0 +1,14 @@
+services:
+  bol-ke-order:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # All optional. The app starts and works without them.
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - orders-data:/data
+    restart: unless-stopped
+volumes:
+  orders-data:

@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (after commit `d5bc63c`). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (after commit `9c9f9c4`, branch `pilot-ready`). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -120,6 +120,7 @@ Not checked yet:
 
 ## 8. Known limits and next steps
 
+- **Next (approved 27 Nov, branch `pilot-ready`):** shop-ready + pilot numbers before 30 Nov. Busy export import for items and parties, parties moved to SQLite, numbers saved with every order (time to confirm, questions, corrections, "Galat nikla"), a Pilot tab with CSV, then deploy and test in the shop. Design: `docs/superpowers/specs/2026-11-27-pilot-ready-design.md`. Why: the Round 2 masterclass (VC speaker) stressed real-user testing in person and before/after numbers; no rubric was published.
 - Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are still hard-coded sample data. Next: CSV import of the pilot shop's item list, and a Parties page.
 - Orders cannot be deleted from the app (test orders stay in `data/orders.db`; delete that file to start clean locally).
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
@@ -153,6 +154,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| design doc (branch `pilot-ready`) | Design for shop-ready + pilot numbers; no code change yet |
 | parser fix (after `948189e`) | Parser: keep order clauses that mention rate, "uski/usmein" point to the last item, "agar ... nahi toh" gives two quantities to ask; condition shown on the line |
 | `d5bc63c` | Dispatch keeps context between turns; Hindi "हां पक्का" works; find orders by number; several orders in one truck; split joined numbers like 345 |
 | `e33375e` | Parchi no longer prints the heard text; nicer dates |

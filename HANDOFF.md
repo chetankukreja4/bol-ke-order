@@ -114,7 +114,8 @@ Checked:
 - The server start command and health check work.
 
 Not checked yet:
-- **Docker build**: Docker is not installed on the dev PC. The Dockerfile is simple, but run it once before submitting.
+- **Docker build**: Docker is not installed on the dev PC (checked again 27 Nov on branch `pilot-ready`). The Dockerfile is simple and installs `requirements.txt` (now with `openpyxl`), but run it once before submitting.
+- **A real Busy export**: the importer was tested with Busy-style files we made (title rows, Name/Alias/Group/Main Unit, Sundry Debtors). Import the shop's real file once and look at the preview before saying yes.
 - **Phone microphone over HTTPS**: needs a deploy. The header pill "Mic: Sarvam AI ⇄" switches between Sarvam and the browser recogniser; the browser one writes Devanagari and mishears numbers and "truck" more often.
 - **A real Samsung call transcript**: the four formats tested were written by us. Paste one real copy to check.
 - **Upload of a real call recording** through Sarvam.
@@ -122,6 +123,13 @@ Not checked yet:
 
 ## 8. Known limits and next steps
 
+- **Shop-day checklist (pilot):**
+  1. Deploy (`DEPLOY.md`): Chetan creates the host account; `SARVAM_API_KEY` as a secret; volume at `/data`. Start with a fresh `/data` (old test orders would count in the pilot numbers).
+  2. In Busy, export the item list and the account list to Excel (.xlsx) or CSV. On the Items tab: "Busy se items laayein", then "Busy se parties laayein"; check the preview, then "Haan".
+  3. Before using the app, time 5 normal phone orders with a stopwatch (call end → entry done in Busy). Pilot tab → "Pehle ka time" → type the seconds.
+  4. Tick "Practice order" while staff try it out; untick for real orders.
+  5. When a saved order turns out wrong, open it in Orders → "Galat nikla?" → pick why.
+  6. End of day: Pilot tab → "CSV" for the video and the deck.
 - **Next (approved 27 Nov, branch `pilot-ready`):** shop-ready + pilot numbers before 30 Nov. Busy export import for items and parties, parties moved to SQLite, numbers saved with every order (time to confirm, questions, corrections, "Galat nikla"), a Pilot tab with CSV, then deploy and test in the shop. Design: `docs/superpowers/specs/2026-11-27-pilot-ready-design.md`. Why: the Round 2 masterclass (VC speaker) stressed real-user testing in person and before/after numbers; no rubric was published.
 - Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are now in SQLite (seeded from the 7 samples) and both lists can be replaced from a Busy export.
 - Orders cannot be deleted from the app (test orders stay in `data/orders.db`; delete that file to start clean locally).
@@ -156,6 +164,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| deploy notes (branch `pilot-ready`) | Shop-day checklist (section 8); DEPLOY.md: import Busy lists after the first deploy |
 | import buttons (branch `pilot-ready`) | Items tab: "Busy se items laayein" / "Busy se parties laayein" (preview, then "Haan" replaces the list) and a read-only Parties list. Checked in the browser on a scratch DB: CSV with a title row, 3 items + 2 debtor parties loaded, "Verma ko ..." asks which Verma, new item matched |
 | party import (branch `pilot-ready`) | Parties in SQLite (`parties` table); `GET /api/parties`, `POST /api/parties/import` (only Sundry Debtors when the file has groups). "Which Sharma?" words are worked out from the list (`catalog.ambiguous_words`), so imported parties ask too |
 | item import (branch `pilot-ready`) | `POST /api/items/import` (preview; `?commit=1` replaces the item list). Needs `openpyxl` (added to requirements) |

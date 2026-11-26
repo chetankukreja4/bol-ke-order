@@ -6,6 +6,8 @@ A voice-first order taker for Indian wholesale shops. Staff speak the order in H
 > → *"ABC Traders, 10 carton soap, 5 carton Fortune Refined Oil, delivery kal. Kaun sa soap brand?"*
 > → "Lux" → "nahi, aath carton" → "haan, pakka" → **Parchi #1 saved**
 
+Built for **Build for Bharat (Scaler × Flow), Round 2**, theme *Livelihoods and small business*. New to the project? Read **[HANDOFF.md](HANDOFF.md)**.
+
 ## Run it (one command)
 
 ```bash
@@ -76,7 +78,18 @@ docker compose run --rm bol-ke-order pytest -q      # or: .venv/bin/pytest -q
 
 ## Deploy (public URL)
 
-Any Docker host works. On Render: push this repo to GitHub → New → Blueprint → pick the repo (uses `render.yaml`) → add keys if you have them. Render gives an HTTPS URL, which the browser mic needs. Note: the free tier's disk is temporary, so orders reset on redeploy.
+One Docker container: build from the `Dockerfile`, port `8000` (or `$PORT`), HTTPS on, a persistent volume at `/data`, health check `/healthz`. Step-by-step for Dostack Cloud or any Docker host, a VPS, or Render: **[DEPLOY.md](DEPLOY.md)**.
+
+## Project layout
+
+```
+app/        FastAPI backend (main, dialog, parser, matcher, textnorm, stt, llm, db, catalog, samples)
+static/     index.html, app.js, style.css (light + dark)
+tests/      pytest suite (33 tests)
+Dockerfile, docker-compose.yml, render.yaml, .env.example
+HANDOFF.md  status, what is tested, next steps, demo and deck notes
+DEPLOY.md   how to host it
+```
 
 ## Not in this prototype
 

@@ -48,8 +48,8 @@ def _refresh_line(line):
     return line
 
 
-def build_draft(transcript: str, extracted=None):
-    data = extracted or extract_rules(transcript)
+def build_draft(transcript: str):
+    data = extract_rules(transcript)
     draft = {
         "heard": readable(transcript),
         "party": {"status": data["party"]["status"], "party": data["party"]["party"],

@@ -7,8 +7,6 @@ services:
     environment:
       # All optional. The app starts and works without them.
       - SARVAM_API_KEY=${SARVAM_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-opus-5-5}
     volumes:
       - orders-data:/data
     restart: unless-stopped

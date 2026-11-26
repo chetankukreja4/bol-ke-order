@@ -16,12 +16,13 @@ docker compose up --build
 
 Open http://localhost:8000. **No keys are needed** to start: the main screen, the browser microphone, the rule-based Hinglish parser, read-back, questions, saving, parchi, CSV and dispatch all work without any key. Features that need a key show a "key not set" label.
 
-Optional keys (copy `.env.example` to `.env`):
+Optional key (copy `.env.example` to `.env`):
 
 | Key | What it adds | Without it |
 |---|---|---|
-| `SARVAM_API_KEY` | Server speech-to-text (Sarvam `saarika`, Hindi/English/Hinglish) for uploaded recordings, up to 10 minutes, processed in 25 s chunks | Uploads say "Speech key not set"; live mic uses the browser's speech recognition |
-| `ANTHROPIC_API_KEY` | Claude extracts fields from messy call transcripts (party, item, quantity words, unit, date) as JSON | Built-in rule parser does the extraction |
+| `SARVAM_API_KEY` | Sarvam `saaras:v4` speech-to-text (Roman Hinglish, tuned with catalog and party names) for the live mic and for uploaded recordings up to 10 minutes, processed in 25 s chunks | Live mic uses the browser's speech recognition; uploads say "Speech key not set" |
+
+This is the only key. There is no LLM: order understanding is plain code, so it costs nothing per order and keeps working if an AI service goes away.
 
 Without Docker:
 
@@ -35,13 +36,12 @@ Live mic needs Chrome or Edge (Web Speech API) and HTTPS or localhost.
 ## How it works
 
 ```
-mic (browser speech, hi-IN)  ─┐
+mic → Sarvam (if key) or browser speech hi-IN ─┐
 upload m4a/ogg/mp3 ─► ffmpeg 25s chunks ─► Sarvam STT ─┤
                                                       ▼
                                          transcript (shown on screen)
                                                       ▼
-            LLM (optional): copy fields to JSON — no matching, no maths
-            or rule parser: clauses, small talk + bargaining dropped
+            rule parser: clauses, small talk + bargaining dropped
                                                       ▼
    code only: Devanagari→Roman, spoken numbers → int, fuzzy match to catalog,
    party match, date, one question at a time, corrections, validation
@@ -49,7 +49,7 @@ upload m4a/ogg/mp3 ─► ffmpeg 25s chunks ─► Sarvam STT ─┤
         read-back (TTS + screen) ─► "haan, pakka" ─► SQLite ─► parchi + CSV
 ```
 
-* **The LLM never decides anything.** It only copies the words that were said. Numbers ("das", "dus", "ten", "pachees", "25", "do sau", "दस") are converted in `app/textnorm.py`; items are matched with RapidFuzz in `app/matcher.py`.
+* **No LLM.** Everything after speech-to-text is plain code. Numbers ("das", "dus", "ten", "pachees", "25", "do sau", "दस") are converted in `app/textnorm.py`; items are matched with RapidFuzz in `app/matcher.py`.
 * **Never guesses.** A generic word ("sabun") asks the brand. A weak match shows the top three and asks. Two quantities ("10 ya 12") ask. Two similar parties ("Sharma ji") ask which. Uncertain lines are yellow with "Pakka nahi hoon."
 * **Corrections** like "nahi, aath carton" change only that one line.
 * **Noise:** low confidence or empty text → "Awaaz saaf nahi aayi, dobara bolein", and the recording is kept for retry. 8 s of silence → one gentle prompt. Network failure → request retried, recording kept.
@@ -83,9 +83,9 @@ One Docker container: build from the `Dockerfile`, port `8000` (or `$PORT`), HTT
 ## Project layout
 
 ```
-app/        FastAPI backend (main, dialog, parser, matcher, textnorm, stt, llm, db, catalog, samples)
+app/        FastAPI backend (main, dialog, parser, matcher, textnorm, stt, db, catalog, samples)
 static/     index.html, app.js, style.css (light + dark)
-tests/      pytest suite (33 tests)
+tests/      pytest suite (35 tests)
 Dockerfile, docker-compose.yml, render.yaml, .env.example
 HANDOFF.md  status, what is tested, next steps, demo and deck notes
 DEPLOY.md   how to host it

@@ -4,7 +4,7 @@ Turns "ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena" into
     party_text="abc wale", delivery="kal",
     lines=[{item_text:"sabun", qty_values:[10], unit:"carton"}, ...]
 Small talk and bargaining clauses (rate, discount, bhav) are dropped.
-The LLM extractor in llm.py returns the same shape when a key is set.
+No LLM is used anywhere: the app keeps working if any AI service goes away.
 """
 import re
 from datetime import datetime, timedelta, timezone

@@ -56,10 +56,30 @@ function speak(text) {
 }
 
 // ----------------------------------------------------------- speech capture
-// Starts browser speech recognition (+ a recording kept for retries).
+// Two engines:
+//  * "sarvam": record the mic and send the clip to the server (Sarvam saaras:v4),
+//    used whenever the server has SARVAM_API_KEY. Much better with Hinglish and
+//    shop noise than the browser recogniser. A level meter decides when you stop.
+//  * "browser": Web Speech (hi-IN), used when no key is set or the user picks it.
+const hasRecorder = () => !!(navigator.mediaDevices && window.MediaRecorder);
+function micEngine() {
+  let pick = null; try { pick = localStorage.getItem('bko-mic'); } catch (_) {}
+  const sarvamOk = state.cfg?.server_stt && hasRecorder();
+  if (pick === 'browser' && SR) return 'browser';
+  if (sarvamOk) return 'sarvam';
+  return SR ? 'browser' : (hasRecorder() ? 'record' : 'none');
+}
+const micAvailable = () => micEngine() !== 'none';
+const blobExt = (type) => (/mp4|aac|m4a/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : 'webm');
+
+// Starts capture (+ a recording kept for retries).
 function startCapture({ onInterim, onAutoStop }) {
-  const ctl = { finals: [], conf: [], interim: '', blob: null, autoStop: false, prompted: false, stopping: false };
+  const engine = micEngine();
+  const ctl = { finals: [], conf: [], interim: '', blob: null, autoStop: false, prompted: false, stopping: false,
+    heard: false, engine };
   let rec = null, recorder = null, chunks = [], stream = null, silenceTimer = null, quietTimer = null;
+  let audioCtx = null, levelTimer = null;
+  const t0 = Date.now();
 
   const resetSilence = () => {
     clearTimeout(silenceTimer);
@@ -74,19 +94,56 @@ function startCapture({ onInterim, onAutoStop }) {
     }, SILENCE_MS);
   };
 
-  const wantRecorder = !SR || !IS_ANDROID; // Android Chrome can't share the mic with SR
-  if (wantRecorder && navigator.mediaDevices && window.MediaRecorder) {
-    ctl.recorderReady = navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => {
+  // Voice-activity detection from the mic level: knows when someone is talking
+  // and when they stopped, without needing the browser recogniser.
+  const watchLevel = (s) => {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const an = audioCtx.createAnalyser(); an.fftSize = 1024;
+      audioCtx.createMediaStreamSource(s).connect(an);
+      const buf = new Float32Array(an.fftSize);
+      let floor = 0.01, lastLoud = 0, loudRun = 0;
+      levelTimer = setInterval(() => {
+        an.getFloatTimeDomainData(buf);
+        let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length), now = Date.now();
+        const thr = Math.max(0.015, floor * 2.8);
+        if (rms > thr) {
+          loudRun++;
+          if (loudRun >= 2) { // ~200 ms of sound = speech, not a click
+            lastLoud = now;
+            if (!ctl.heard) { ctl.heard = true; if (engine !== 'browser') onInterim && onInterim('🎙 Sun raha hoon…'); }
+            resetSilence();
+          }
+        } else {
+          loudRun = 0;
+          floor = floor * 0.95 + rms * 0.05; // follows the shop's background noise
+        }
+        if (engine !== 'browser' && ctl.autoStop && ctl.heard && !ctl.stopping && now - lastLoud > 1600 && now - t0 > 1200) {
+          onAutoStop && onAutoStop();
+        }
+      }, 100);
+    } catch (_) { /* no level meter: hold-to-speak and the 8 s timeout still work */ }
+  };
+
+  const useSR = SR && (engine === 'browser' || (engine === 'sarvam' && !IS_ANDROID)); // desktop: live preview too
+  const wantRecorder = hasRecorder() && (engine !== 'browser' || !IS_ANDROID); // Android can't share the mic with SR
+  if (wantRecorder) {
+    ctl.recorderReady = navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+    }).then((s) => {
       stream = s; recorder = new MediaRecorder(s);
       recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       recorder.start();
+      watchLevel(s);
+      if (engine !== 'browser' && !ctl.heard) onInterim && onInterim('🎙 Boliye…');
     }).catch(() => toast('Mic permission chahiye'));
   }
 
-  if (SR) {
+  if (useSR) {
     rec = new SR();
     rec.lang = localStorage.getItem('bko-lang') || 'hi-IN';
-    rec.interimResults = true; rec.continuous = true;
+    rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
     rec.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -95,9 +152,10 @@ function startCapture({ onInterim, onAutoStop }) {
         else interim += r[0].transcript;
       }
       ctl.interim = interim;
+      ctl.heard = true;
       onInterim && onInterim((ctl.finals.join(' ') + ' ' + interim).trim());
       resetSilence();
-      if (ctl.autoStop) { // tap mode: stop after a short pause once something was said
+      if (ctl.autoStop && engine === 'browser') { // tap mode: stop after a short pause once something was said
         clearTimeout(quietTimer);
         quietTimer = setTimeout(() => ctl.finals.length && !ctl.stopping && onAutoStop && onAutoStop(), 1800);
       }
@@ -110,7 +168,7 @@ function startCapture({ onInterim, onAutoStop }) {
 
   ctl.stop = async () => {
     ctl.stopping = true;
-    clearTimeout(silenceTimer); clearTimeout(quietTimer);
+    clearTimeout(silenceTimer); clearTimeout(quietTimer); clearInterval(levelTimer);
     if (rec) { try { rec.stop(); } catch (_) {} }
     if (ctl.recorderReady) await ctl.recorderReady;
     if (recorder && recorder.state !== 'inactive') {
@@ -118,10 +176,27 @@ function startCapture({ onInterim, onAutoStop }) {
       ctl.blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
     }
     if (stream) stream.getTracks().forEach((t) => t.stop());
-    await sleep(SR ? 350 : 0); // let the last final result arrive
-    const text = (ctl.finals.join(' ') + ' ' + (ctl.interim || '')).trim();
+    if (audioCtx) audioCtx.close().catch(() => {});
+    await sleep(rec ? 350 : 0); // let the last final result arrive
+    const browserText = (ctl.finals.join(' ') + ' ' + (ctl.interim || '')).trim();
     const conf = ctl.conf.length ? ctl.conf.reduce((a, b) => a + b, 0) / ctl.conf.length : null;
-    return { text, conf, blob: ctl.blob };
+    const blobName = ctl.blob ? `mic.${blobExt(ctl.blob.type)}` : null;
+    const base = { text: browserText, conf, blob: ctl.blob, blobName, source: 'browser' };
+
+    if (engine === 'sarvam' && ctl.blob && ctl.blob.size > 1500) {
+      if (!ctl.heard && !browserText) return { ...base, text: '' }; // nothing said: don't spend a call
+      onInterim && onInterim('⏳ Samajh raha hoon… (Sarvam AI)');
+      const fd = new FormData(); fd.append('file', ctl.blob, blobName);
+      try {
+        const r = await api('/api/transcribe', { method: 'POST', body: fd }, 2);
+        if (r.transcript && r.transcript.trim()) return { ...base, text: r.transcript.trim(), conf: null, source: 'server' };
+        return { ...base, conf: null }; // Sarvam heard nothing: keep the browser's text, if any
+      } catch (e) {
+        toast(e.network ? 'Network slow hai — browser wala text use kar rahe hain' : `Sarvam: ${e.message}`);
+        return base;
+      }
+    }
+    return base;
   };
   return ctl;
 }
@@ -168,8 +243,8 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 // ------------------------------------------------------------ order capture
 async function handleCaptured(res, source) {
   state.blob = res.blob || state.blob;
-  state.blobName = res.blob ? 'mic.webm' : state.blobName;
-  if (!SR && res.blob) return sendRecording(); // no browser speech: server does it
+  state.blobName = res.blob ? res.blobName : state.blobName;
+  if (res.source !== 'server' && !res.text && res.blob && micEngine() === 'record') return sendRecording(); // no browser speech: server does it
   const unclear = !res.text || res.text.split(/\s+/).length < 2 || (res.conf !== null && res.conf > 0 && res.conf < LOW_CONFIDENCE);
   showTranscript(res.text, unclear);
 }
@@ -255,7 +330,7 @@ function renderConfirm(speakIt) {
   } else qb.classList.add('hidden');
   $('cfSay').textContent = `🔊 ${d.say}`;
   $('cfConfirm').disabled = !d.ready;
-  if (speakIt) speak(d.say).then(() => { if (SR && $('screen-confirm').classList.contains('active')) answerMic.listen(); });
+  if (speakIt) speak(d.say).then(() => { if (micAvailable() && $('screen-confirm').classList.contains('active')) answerMic.listen(); });
 }
 
 async function sendAnswer(text) {
@@ -317,7 +392,7 @@ async function handleDispatch(res) {
       $('dsNo').onclick = () => { state.dispatch = null; box.classList.add('hidden'); };
     }
     await speak(r.say);
-    if (r.ok && SR) dispatchMic.listen();
+    if (r.ok && micAvailable()) dispatchMic.listen();
   } catch (e) { toast(e.network ? 'Network nahi hai, dobara bolein' : e.message); }
 }
 
@@ -360,15 +435,30 @@ async function loadOrders() {
   } catch (_) { $('orders').innerHTML = '<small>Could not load orders (offline?).</small>'; }
 }
 
+function micPill() {
+  const e = micEngine();
+  const label = { sarvam: 'Mic: Sarvam AI', browser: 'Mic: browser', record: 'Mic: record only', none: 'Mic: not available' }[e];
+  const canSwitch = state.cfg?.server_stt && SR && hasRecorder();
+  return `<span class="pill ${e === 'none' ? 'off' : ''}" data-mic ${canSwitch ? 'role="button" tabindex="0" title="Tap to switch speech engine" style="cursor:pointer"' : ''}>${label}${canSwitch ? ' ⇄' : ''}</span>`;
+}
+function toggleMic() {
+  if (!(state.cfg?.server_stt && SR && hasRecorder())) return;
+  const next = micEngine() === 'sarvam' ? 'browser' : 'sarvam';
+  try { localStorage.setItem('bko-mic', next); } catch (_) {}
+  $('pills').querySelector('[data-mic]').outerHTML = micPill();
+  $('pills').querySelector('[data-mic]').addEventListener('click', toggleMic);
+  toast(next === 'sarvam' ? 'Ab Sarvam AI sunega' : 'Ab browser sunega');
+}
+
 async function init() {
   initTheme();
   try { state.cfg = await api('/api/config'); } catch (_) { state.cfg = { test_phrases: [] }; }
   const c = state.cfg;
   $('pills').innerHTML = [
-    SR ? '<span class="pill">Mic: browser</span>' : '<span class="pill off">Mic: no browser speech</span>',
+    micPill(),
     c.server_stt ? '<span class="pill">Uploads: on</span>' : '<span class="pill off" title="' + esc(c.stt_message) + '">Speech key not set</span>',
-    c.llm ? '<span class="pill">LLM: on</span>' : '<span class="pill off" title="' + esc(c.llm_message) + '">LLM key not set · rules</span>',
   ].join('');
+  $('pills').querySelector('[data-mic]')?.addEventListener('click', toggleMic);
   $('samples').innerHTML = (c.test_phrases || []).map((p, i) => `<button class="chip" data-i="${i}">${esc(p.text)}</button>`).join('');
   $('samples').querySelectorAll('.chip').forEach((b) => b.onclick = () => showTranscript(c.test_phrases[b.dataset.i].text, false));
 

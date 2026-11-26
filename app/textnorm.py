@@ -76,7 +76,20 @@ def norm(text: str) -> str:
     t = t.replace("ee", "i").replace("oo", "u")
     t = re.sub(r"([a-z])\1+", r"\1", t)  # aath->ath, pachchees->pachis, dass->das
     t = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", t)  # keep 2.5, drop full stops
-    return re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+", " ", t).strip()
+    return " ".join(_split_glued(w) for w in t.split(" ")) if t else t
+
+
+# Speech-to-text sometimes joins a unit or brand to the next word
+# ("borichini", "tatanamak"). Split these off when what is left is a real word.
+_GLUE_PREFIXES = ("karton", "carton", "kata", "bori", "peti", "daba", "packet", "paket", "tata", "kal")
+
+
+def _split_glued(word: str) -> str:
+    for p in _GLUE_PREFIXES:
+        if word.startswith(p) and len(word) - len(p) >= 4 and not word[len(p):].isdigit():
+            return f"{p} {word[len(p):]}"
+    return word
 
 
 def readable(text: str) -> str:

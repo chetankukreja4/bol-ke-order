@@ -1,6 +1,6 @@
 """Fuzzy matching of spoken item and party names against the catalog.
 
-Rules (all in code, never in the LLM):
+Rules (all in plain code):
 * A strong, clear match (score >= 88 and well ahead of the next item) is accepted.
 * A generic word like "sabun" maps to a group -> ask which brand.
 * Anything weaker is never guessed: we return the top three and ask.

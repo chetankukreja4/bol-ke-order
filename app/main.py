@@ -4,7 +4,26 @@ import io
 import os
 import tempfile
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+
+def _load_dotenv(path=os.path.join(os.path.dirname(__file__), "..", ".env")):
+    """Read KEY=value lines from .env for local runs (real env vars win)."""
+    if os.getenv("BKO_NO_DOTENV"):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    if v.strip():
+                        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except OSError:
+        pass
+
+
+_load_dotenv()
+
+from fastapi import FastAPI, File, HTTPException, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,7 +31,6 @@ from pydantic import BaseModel
 from . import db, stt
 from .catalog import CATALOG, PARTIES
 from .dialog import answer, build_draft, validate_for_save
-from .llm import extract_llm, llm_available
 from .parser import parse_dispatch
 from .samples import TEST_PHRASES
 
@@ -45,8 +63,6 @@ def config():
     return {
         "server_stt": stt.stt_available(),
         "stt_message": None if stt.stt_available() else "Speech key not set (SARVAM_API_KEY). Live mic uses the browser; uploads are off.",
-        "llm": llm_available(),
-        "llm_message": None if llm_available() else "LLM key not set (ANTHROPIC_API_KEY). Using built-in rule parser.",
         "catalog": CATALOG, "parties": PARTIES, "test_phrases": TEST_PHRASES,
     }
 
@@ -80,10 +96,7 @@ async def transcribe(file: UploadFile = File(...)):
 @app.post("/api/parse")
 def parse(body: TextIn):
     text = body.text.strip()
-    extracted = extract_llm(text) if (llm_available() and text) else None
-    draft = build_draft(text, extracted)
-    draft["extractor"] = "llm" if extracted else "rules"
-    return draft
+    return build_draft(text)
 
 
 @app.post("/api/answer")

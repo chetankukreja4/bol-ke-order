@@ -19,9 +19,7 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 
 | Name | Needed? | Purpose |
 |---|---|---|
-| `SARVAM_API_KEY` | Optional | Speech-to-text for uploaded recordings. Without it, uploads show "Speech key not set". |
-| `ANTHROPIC_API_KEY` | Optional | Claude extracts order fields from messy calls. Without it, the built-in rule parser is used. |
-| `CLAUDE_MODEL` | Optional | Defaults to `claude-opus-5-5`. |
+| `SARVAM_API_KEY` | Optional | Speech-to-text (Sarvam `saaras:v4`) for the live mic and uploaded recordings. Without it, the live mic uses the browser's speech recognition and uploads show "Speech key not set". |
 | `PORT` | Set by most hosts | Port to listen on. Default `8000`. |
 | `DB_PATH` | Optional | Default `/data/orders.db`. |
 
@@ -34,7 +32,7 @@ Put keys in the host's "secrets" or "environment" screen. Never put them in the 
 3. Set the port to `8000` (or leave it if the host sets `$PORT`).
 4. Add a persistent volume mounted at `/data`.
 5. Set the health check path to `/healthz`.
-6. Add `SARVAM_API_KEY` / `ANTHROPIC_API_KEY` if you have them.
+6. Add `SARVAM_API_KEY` if you have it.
 7. Deploy. Open the HTTPS URL on your phone in Chrome and tap **Order bolo**.
 8. Turn on auto-deploy from `main` so each push updates the app.
 

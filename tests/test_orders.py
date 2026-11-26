@@ -3,8 +3,8 @@ import os
 import tempfile
 
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
-os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("SARVAM_API_KEY", None)
+os.environ["BKO_NO_DOTENV"] = "1"  # tests never use the real keys in .env
 
 import pytest
 from fastapi.testclient import TestClient
@@ -91,7 +91,7 @@ def test_nothing_saved_until_confirm():
 
 def test_full_api_flow_and_dispatch():
     cfg = client.get("/api/config").json()
-    assert cfg["server_stt"] is False and cfg["llm"] is False
+    assert cfg["server_stt"] is False and "llm" not in cfg
     d = client.post("/api/parse", json={"text": "Gupta ji ko das peti Lux aur pachees bori cheeni parso"}).json()
     assert d["ready"]
     r = client.post("/api/answer", json={"draft": d, "text": "haan pakka"}).json()
@@ -114,3 +114,38 @@ def test_upload_without_key_says_key_not_set():
 def test_dispatch_parse_modes():
     assert parse_dispatch("ABC ka maal gaya, rickshaw se")["mode"] == "rickshaw"
     assert parse_dispatch("Bittu ka saman tempo se bhej diya")["mode"] == "tempo"
+
+
+def test_sarvam_request_uses_translit_and_shop_keyterms():
+    import json as _json
+    from app import stt
+    form = stt._form()
+    assert form["model"] == "saaras:v4" and form["mode"] == "translit" and form["language_code"] == "hi-IN"
+    terms = _json.loads(form["keyterms"])
+    assert "Lux Soap" in terms and "ABC Traders" in terms and len(terms) <= 50
+    assert all(len(t) <= 64 for t in terms)
+    assert stt._form(minimal=True) == {"model": "saaras:v4", "language_code": "hi-IN"}
+
+
+def test_sarvam_falls_back_to_plain_settings_on_400(tmp_path):
+    import asyncio
+    import httpx
+    from app import stt
+    sent = []
+
+    def handler(request):
+        body = request.content.decode("latin-1")
+        sent.append("keyterms" in body)
+        if "keyterms" in body:
+            return httpx.Response(400, json={"error": "keyterms not supported"})
+        return httpx.Response(200, json={"transcript": "abc ko 10 carton lux"})
+
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"RIFF0000WAVE")
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await stt._transcribe_chunk(c, str(wav), "k")
+
+    assert asyncio.run(run()) == "abc ko 10 carton lux"
+    assert sent == [True, False]

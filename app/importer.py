@@ -7,6 +7,7 @@ fills the lists the matcher already uses.
 """
 import csv
 import io
+import itertools
 import re
 
 from rapidfuzz import fuzz
@@ -63,7 +64,8 @@ def _grid(filename, data):
             wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         except Exception as e:  # corrupt file, password, not really xlsx
             raise ImportProblem("Ye Excel file khul nahi rahi. Busy se dobara .xlsx ya CSV export karein.") from e
-        return [[_cell(c) for c in row] for row in wb.active.iter_rows(values_only=True)]
+        rows = itertools.islice(wb.active.iter_rows(values_only=True), HEADER_SCAN + MAX_ROWS + 1)
+        return [[_cell(c) for c in row] for row in rows]
     raise ImportProblem("Excel ko .xlsx ya CSV mein save karein")
 
 
@@ -81,7 +83,11 @@ def read_table(filename, data):
     for row in grid[i + 1:i + 1 + MAX_ROWS]:
         if not any(row):
             continue
-        rows.append({h: (row[j] if j < len(row) else "") for j, h in enumerate(heads) if h})
+        rec = {}
+        for j, h in enumerate(heads):
+            if h and h not in rec:  # two columns named "Name": the first one wins
+                rec[h] = row[j] if j < len(row) else ""
+        rows.append(rec)
     return rows
 
 
@@ -173,6 +179,13 @@ NOT_CUSTOMER = ("bank", "cash", "expense", "creditor", "dut", "tax", "capital", 
                 "deposit", "investment", "branch", "profit")
 
 
+BUSY_HEADINGS = {"sundry debtors", "sundry creditors", "bank accounts", "bank od account", "cash-in-hand",
+                 "cash in hand", "direct expenses", "indirect expenses", "direct incomes", "indirect incomes",
+                 "duties & taxes", "duties and taxes", "capital account", "current assets", "current liabilities",
+                 "fixed assets", "investments", "loans (liability)", "loans & advances (asset)", "purchase accounts",
+                 "sales accounts", "stock-in-hand", "provisions", "reserves & surplus", "suspense account"}
+
+
 def _customer_group(group):
     g = _key(group)
     return not g or "debtor" in g or not any(w in g for w in NOT_CUSTOMER)
@@ -184,12 +197,17 @@ def to_parties(rows, existing=()):
     parties, skipped, names = [], [], set()
     old = _old_codes(existing)
     used = set(old.values())
+    heading = ""  # a "grouped" Busy export puts the group name on its own row above its accounts
     for n, row in enumerate(rows, 1):
         name = _pick(row, PARTY_COLS["name"])
         if not name or len(name) > 80:
             skipped.append({"row": n, "name": name, "reason": "naam nahi"})
             continue
-        if not _customer_group(_pick(row, PARTY_COLS["group"])):
+        if _key(name) in BUSY_HEADINGS or "sundry" in _key(name):
+            heading = name
+            skipped.append({"row": n, "name": name, "reason": "group heading"})
+            continue
+        if not _customer_group(_pick(row, PARTY_COLS["group"]) or heading):
             skipped.append({"row": n, "name": name, "reason": "customer nahi"})
             continue
         if name.lower() in names:

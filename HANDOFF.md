@@ -87,7 +87,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (look taken from the Codex prototype `bol-ke-order-scaler-round-2`: green ink, lime accent, white cards, pill page nav at the top; light + dark). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
 | `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
-| `tests/test_import.py`, `tests/test_pilot.py` | 18 + 10 tests: Busy imports, which-party questions, pilot numbers. 72 tests in all |
+| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py` | 18 + 10 + 44 tests: Busy imports, which-party questions, pilot numbers, and one test per bug from the 27 Nov full check. 116 tests in all |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -95,7 +95,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 72 tests (inside .venv or the container)
+pytest -q                          # 116 tests (inside .venv or the container)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -107,7 +107,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 72 tests pass (28 new on branch `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
+- 116 tests pass (44 bug tests on branch `codex-look`, 28 on `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
 - Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
 - In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
 - The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
@@ -138,6 +138,7 @@ Not checked yet:
 - On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
 - No login, one shop only, no dues or payments module (kept out on purpose).
 - Busy integration is CSV only.
+- Optional shop PIN: set `BKO_PIN` on the host and the app asks for it once (kept 90 days as a cookie). Without it the app stays open, as before.
 - Cost: each long call through Sarvam costs money. Measure the cost per order during the pilot; the shop owner said he would pay about ₹2,000 a year.
 
 ## 9. Demo video plan (≤ 3 min)
@@ -165,6 +166,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| bug fixes (branch `codex-look`) | From the 27 Nov full check: "pakka nahi" / "save mat karo" / "sahi hai kya" never save; one draft saves one order (double tap, network retry); "rehne do" changes nothing; dozen and gram are units; the day said last wins and "kal nahi" is dropped; two parties in one call ask; a party with two open orders asks which in dispatch; "Waiting to go" taps ask "Pakka?"; the Orders list keeps every pending order; an item said without a quantity asks "kitna?"; save takes names from the lists and checks unit, date (up to 60 days) and quantity (max 9999); "10 se 12" asks which; re-dispatch refused, mode checked; "Galat nikla" has Undo; a spoken name used by another item is refused; grouped Busy exports skip headings and bank rows; ffmpeg no longer blocks the server; optional `BKO_PIN`. Checked in the browser on a scratch DB. Not pushed |
 | Codex layout (branch `codex-look`) | Pages rebuilt in the Codex structure: heading row (title left, action right), content in white cards, equal two-column cards (Order: voice / paste; Dispatch: voice / waiting list; Done: parchi / next steps; Pilot: details / baseline), 3x2 pilot tiles, text-only page nav, footer. Paste box shows first; "Type the order instead" swaps it (same JS). Order lines show the name left and quantity right. Not pushed |
 | Codex look (branch `codex-look`) | New look from the Codex prototype: `style.css` rewritten, Order page split into two cards (Voice or recording / Paste or type), "b." brand mark, page nav at the top on phones too. Only CSS and HTML wrappers changed; `app.js`, the backend and every element ID are the same. Checked in the browser: all tabs, the order flow, desktop and phone, light and dark |
 | review fixes (branch `pilot-ready`) | After a whole-branch review: exact full item names are accepted even with a generic word ("toor dal", "haldi powder"), a "which brand?" never has zero options and shows at most 8; Busy group only from an exact name; numeric/short aliases dropped and numbers never name a party; near-same party names ("Shiv"/"Shiva") ask; party and item codes stay the same on re-import; Sarvam keyterms keep 20 parties first; odd CSV bytes read; the pilot clock starts when staff start the order (browser sends `elapsed`), and the Pilot tab says what is timed |

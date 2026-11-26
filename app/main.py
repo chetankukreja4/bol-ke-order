@@ -1,10 +1,14 @@
 """Bol-ke-Order API + static frontend."""
+import copy
 import csv
+import hashlib
+import hmac
 import io
 import json
 import os
 import re
 import tempfile
+import uuid
 
 
 def _load_dotenv(path=os.path.join(os.path.dirname(__file__), "..", ".env")):
@@ -44,6 +48,38 @@ MAX_UPLOAD = 30 * 1024 * 1024
 ALLOWED = (".m4a", ".ogg", ".oga", ".opus", ".mp3", ".wav", ".webm", ".aac", ".mp4")
 
 app = FastAPI(title="Bol-ke-Order")
+PIN_COOKIE = "bko_pin"
+
+
+def _pin_hash(pin):
+    return hashlib.sha256(f"bko:{pin}".encode()).hexdigest()
+
+
+@app.middleware("http")
+async def shop_pin(request, call_next):
+    """Optional lock for a deployed app: set BKO_PIN and every /api call needs it.
+    Without BKO_PIN the app stays open (it must start with no keys)."""
+    pin = os.getenv("BKO_PIN", "").strip()
+    path = request.url.path
+    if pin and path.startswith("/api/") and path != "/api/login":
+        if not hmac.compare_digest(request.cookies.get(PIN_COOKIE, ""), _pin_hash(pin)):
+            return JSONResponse({"detail": "PIN chahiye", "error": "pin"}, status_code=401)
+    return await call_next(request)
+
+
+class PinIn(BaseModel):
+    pin: str
+
+
+@app.post("/api/login")
+def login(body: PinIn):
+    pin = os.getenv("BKO_PIN", "").strip()
+    if pin and not hmac.compare_digest(body.pin.strip(), pin):
+        raise HTTPException(401, "PIN galat hai")
+    resp = JSONResponse({"ok": True})
+    if pin:
+        resp.set_cookie(PIN_COOKIE, _pin_hash(pin), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 90)
+    return resp
 catalog.replace_items(db.list_items())  # the shop's own item list from SQLite
 catalog.replace_parties(db.list_parties())  # and its parties
 
@@ -60,6 +96,7 @@ class TextIn(BaseModel):
     source: str | None = None  # mic | upload | transcript | typed (pilot numbers)
     test: bool = False  # practice order: left out of the pilot numbers
     elapsed: float | None = None  # seconds since staff started this order (mic / upload / paste)
+    carry: dict | None = None  # stats of the same order before "Back" (keeps its clock and counts)
 
 
 class AnswerIn(BaseModel):
@@ -146,11 +183,25 @@ def items_list():
     return db.list_items()
 
 
+def _spoken_clash(item, own_code=None):
+    """A spoken name already used by another item makes every order for it
+    "Pakka nahi hoon". Refuse it with the other item's name."""
+    mine = {a for a in item["aliases"]} | {item["name"].lower()}
+    for other in catalog.CATALOG:
+        if other["code"] in (own_code, item["code"]):
+            continue
+        theirs = {a.lower() for a in other["aliases"]} | {other["name"].lower()}
+        both = sorted(mine & theirs)
+        if both:
+            raise HTTPException(409, f"Spoken name '{both[0]}' pehle se {other['name']} ({other['code']}) mein hai")
+
+
 @app.post("/api/items", status_code=201)
 def items_create(body: ItemIn):
     item = _clean_item(body)
     if db.get_item(item["code"]):
         raise HTTPException(409, f"Code {item['code']} pehle se hai")
+    _spoken_clash(item)
     saved = db.save_item(item)
     catalog.replace_items(db.list_items())
     return saved
@@ -163,6 +214,7 @@ def items_update(code: str, body: ItemIn):
     item = _clean_item(body)
     if item["code"] != code and db.get_item(item["code"]):
         raise HTTPException(409, f"Code {item['code']} pehle se hai")
+    _spoken_clash(item, own_code=code)
     saved = db.save_item(item, old_code=code)
     catalog.replace_items(db.list_items())
     return saved
@@ -231,10 +283,12 @@ def parse(body: TextIn):
         draft = build_draft(cleaned["text"])
         draft["source"] = "transcript"
         draft["turns"] = cleaned["turns"]
-        draft["stats"] = pilot.new_stats("transcript", draft, body.test, body.elapsed)
+        draft["stats"] = pilot.new_stats("transcript", draft, body.test, body.elapsed, body.carry)
+        draft["draft_id"] = uuid.uuid4().hex
         return draft
     draft = build_draft(text)
-    draft["stats"] = pilot.new_stats(body.source, draft, body.test, body.elapsed)
+    draft["stats"] = pilot.new_stats(body.source, draft, body.test, body.elapsed, body.carry)
+    draft["draft_id"] = uuid.uuid4().hex
     return draft
 
 
@@ -249,12 +303,18 @@ def create_order(body: DraftIn):
     err = validate_for_save(body.draft)
     if err:
         raise HTTPException(400, err)
-    return db.save_order(body.draft)
+    # names come from the shop's own lists, never from the browser's copy of the draft
+    d = copy.deepcopy(body.draft)
+    d["party"]["party"]["name"] = catalog.PARTIES_BY_CODE[d["party"]["party"]["code"]]["name"]
+    for ln in d["lines"]:
+        ln["item"]["name"] = catalog.ITEMS_BY_CODE[ln["item"]["code"]]["name"]
+    d["heard"] = str(d.get("heard") or "")[:5000]
+    return db.save_order(d)
 
 
 @app.get("/api/orders")
 def orders():
-    return db.list_orders()
+    return db.list_orders_for_ui()
 
 
 def _csv(rows):
@@ -378,10 +438,14 @@ def dispatch_parse(body: DispatchTextIn):
         if res["count"] and res["count"] != len(orders):
             return {"ok": False, "say": f"Aapne {res['count']} order kahe, par {len(orders)} number sune. Order number dobara bolein."}
     elif p["status"] == "ok":
-        o = db.latest_open_order(p["party"]["code"])
-        if not o:
+        open_ = db.open_orders(p["party"]["code"])
+        if not open_:
             return {"ok": False, "say": f"{p['party']['name']} ka koi khula order nahi hai."}
-        orders = [o]
+        if len(open_) > 1:  # never pick one of them silently
+            ids = ", ".join(f"#{o['id']}" for o in open_[:5])
+            return {"ok": False, "mode": res["mode"] or ctx_mode,
+                    "say": f"{p['party']['name']} ke {len(open_)} order khule hain: {ids}. Order number bolein."}
+        orders = open_
     elif p["status"] == "choose":
         names = " ya ".join(o["name"] for o in p["options"])
         return {"ok": False, "say": f"Kaun sa party? {names}? Ya order number bolein.", "options": p["options"],
@@ -404,9 +468,22 @@ def dispatch_parse(body: DispatchTextIn):
 
 @app.post("/api/orders/{order_id}/dispatch")
 def dispatch(order_id: int, body: DispatchIn):
-    if not db.get_order(order_id):
+    o = db.get_order(order_id)
+    if not o:
         raise HTTPException(404, "Order not found")
+    if body.mode not in catalog.DISPATCH_MODES:
+        raise HTTPException(400, "Mode must be one of: " + ", ".join(catalog.DISPATCH_MODES))
+    if o["status"] != "confirmed":
+        raise HTTPException(409, f"Order {order_id} pehle hi {o['dispatch_mode'] or ''} se ja chuka hai")
     return db.mark_dispatched(order_id, body.mode)
+
+
+@app.delete("/api/orders/{order_id}/wrong")
+def order_wrong_undo(order_id: int):
+    o = db.clear_wrong(order_id)
+    if not o:
+        raise HTTPException(404, "Order not found")
+    return o
 
 
 @app.get("/healthz")

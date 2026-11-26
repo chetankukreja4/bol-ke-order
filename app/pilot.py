@@ -13,7 +13,7 @@ def now_iso():
 MAX_ELAPSED = 1800  # 30 min: anything longer is a tab left open, not order time
 
 
-def new_stats(source, draft, test=False, elapsed=None):
+def new_stats(source, draft, test=False, elapsed=None, carry=None):
     """Stats that travel inside the draft until the order is saved.
     `elapsed` = seconds the browser says passed since staff started the order
     (pressed the mic, picked a recording, opened paste/type), so the clock
@@ -25,6 +25,19 @@ def new_stats(source, draft, test=False, elapsed=None):
     uncertain = sum(1 for ln in draft["lines"] if ln.get("uncertain"))
     if draft["party"]["status"] != "ok":
         uncertain += 1
+    if isinstance(carry, dict) and carry.get("started_at"):
+        # "Back" and Samjho again: still the same order, so keep its clock and counts
+        try:
+            started = datetime.fromisoformat(str(carry["started_at"]))
+            if 0 <= (datetime.now(IST) - started).total_seconds() <= MAX_ELAPSED:
+                fresh = new_stats(source, draft, test)
+                fresh.update(started_at=str(carry["started_at"]), questions=int(carry.get("questions") or 0),
+                             corrections=int(carry.get("corrections") or 0))
+                if carry.get("source") in SOURCES:
+                    fresh["source"] = carry["source"]
+                return fresh
+        except (TypeError, ValueError):
+            pass
     return {
         "started_at": (datetime.now(IST) - timedelta(seconds=back)).isoformat(timespec="seconds"),
         "source": source if source in SOURCES else "typed",

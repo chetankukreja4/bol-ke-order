@@ -5,12 +5,16 @@ with each spoken answer. Every function here is plain code (no LLM).
 """
 import uuid
 
-from .catalog import ITEMS_BY_CODE, PARTIES
+from .catalog import ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, UNITS
 from .matcher import choose_from, find_party, group_label, item_option, match_item, party_option
-from .parser import extract_rules, is_confirm, is_correction, parse_date
+from .parser import extract_rules, is_confirm, is_correction, is_leave_it, parse_date, quantities_in, today
 from .textnorm import norm, numbers_in, readable
 
 
+
+
+MAX_QTY = 9999  # more than this is almost surely mis-heard ("das hazaar"?): ask again
+TWO_PARTIES = "Do party ka naam aaya. Ek order ek party ka hota hai; doosri party ka order alag se karein."
 
 
 def _fmt_qty(v):
@@ -43,8 +47,12 @@ def make_line(raw):
     return _refresh_line(line)
 
 
+def _too_big(line):
+    return line["qty"] is not None and float(line["qty"]) > MAX_QTY
+
+
 def _refresh_line(line):
-    line["uncertain"] = line["match"] != "ok" or line["qty"] is None
+    line["uncertain"] = line["match"] != "ok" or line["qty"] is None or _too_big(line)
     if line["item"] and not line["unit"]:
         line["unit"] = line["item"]["unit"]
     return line
@@ -73,6 +81,7 @@ def build_draft(transcript: str):
         "delivery": data["delivery"],
         "lines": _merge_repeats([make_line(r) for r in data["lines"]]),
         "notice": None,
+        "warning": TWO_PARTIES if data.get("two_parties") else None,
     }
     if not draft["lines"]:
         draft["notice"] = "unclear"
@@ -106,6 +115,9 @@ def next_question(d):
         if ln["qty"] is None or ln["qty"] <= 0:
             return {"type": "qty", "line_id": ln["id"], "options": [],
                     "text": f"{_short(ln['item']['name'])} kitna chahiye?"}
+        if _too_big(ln):
+            return {"type": "qty", "line_id": ln["id"], "options": [],
+                    "text": f"{_short(ln['item']['name'])} {_fmt_qty(ln['qty'])}? Ye bahut zyada hai. Sahi quantity bolein."}
     if not d["delivery"]:
         return {"type": "date", "line_id": None, "options": [], "text": "Delivery kab? Aaj, kal ya parso?"}
     return None
@@ -135,7 +147,8 @@ def finish(d):
     d["readback"] = readback(d)
     d["ready"] = d["question"] is None and bool(d["lines"])
     tail = d["question"]["text"] if d["question"] else "Sahi hai? Haan pakka bolein."
-    d["say"] = f"{d['readback']} {tail}".strip()
+    warn = d.get("warning") if d["party"]["status"] != "ok" else None
+    d["say"] = f"{warn + ' ' if warn else ''}{d['readback']} {tail}".strip()
     return d
 
 
@@ -152,7 +165,7 @@ def _set_qty(line, values):
 
 def _apply_correction(d, text):
     """'nahi, aath carton' / 'nahi, lux 8 carton' changes only that one line."""
-    nums = numbers_in(" ".join(norm(text).split()[1:]))
+    nums = quantities_in(" ".join(norm(text).split()[1:]))  # "rehne do" is not 2
     rest = extract_rules(text)
     target = None
     named = [r for r in rest["lines"] if r["item_text"]]
@@ -196,6 +209,10 @@ def answer(d, text: str):
     if not text:
         d["say"] = "Awaaz saaf nahi aayi, dobara bolein."
         return d, "repeat"
+    if is_leave_it(text):  # "nahi, rehne do": change nothing
+        finish(d)
+        d["say"] = f"Theek hai, kuch nahi badla. {d['say']}"
+        return d, "repeat"
     if is_confirm(text) and not is_correction(text):
         finish(d)
         if d["ready"]:
@@ -219,6 +236,8 @@ def answer(d, text: str):
             m = match_item(text)
             if m["status"] == "ok":
                 pick = m["item"]
+        if pick and pick["code"] not in ITEMS_BY_CODE:  # the item list changed while this order was open
+            pick = None
         if pick and line:
             line["item"], line["match"], line["options"] = item_option(pick["code"]), "ok", []
             line["unit"] = line["unit"] or ITEMS_BY_CODE[pick["code"]]["unit"]
@@ -243,7 +262,7 @@ def answer(d, text: str):
             if res["status"] == "choose":
                 d["party"] = {"status": "choose", "party": None, "options": res["options"]}
                 return finish(d), "updated"
-        if pick:
+        if pick and pick["code"] in PARTIES_BY_CODE:
             d["party"] = {"status": "ok", "party": pick, "options": []}
             handled = True
     elif q and q["type"] == "date":
@@ -252,8 +271,6 @@ def answer(d, text: str):
             d["delivery"] = dt
             handled = True
 
-    if handled:
-        _count(d, "questions")
     # extra items said in the answer ("aur 5 bori cheeni") are added as new lines
     if not handled:
         extra = extract_rules(text)
@@ -262,6 +279,8 @@ def answer(d, text: str):
             handled = True
         if extra["delivery"] and not d["delivery"]:
             d["delivery"], handled = extra["delivery"], True
+    if handled:
+        _count(d, "questions")  # every answer that changed the order
     if not handled:
         finish(d)
         d["say"] = f"Samjha nahi. {d['question']['text'] if d['question'] else 'Haan pakka bolein.'}"
@@ -270,9 +289,13 @@ def answer(d, text: str):
 
 
 def validate_for_save(d):
-    """Server-side check before saving. Returns error text or None."""
+    """Server-side check before saving. Returns error text or None.
+    The browser holds the draft, so nothing in it is trusted: codes must be on
+    the lists, units known, quantities sane, the date real and near."""
     if d.get("party", {}).get("status") != "ok":
         return "Party not confirmed"
+    if (d["party"].get("party") or {}).get("code") not in PARTIES_BY_CODE:
+        return "Unknown party"
     if not d.get("lines"):
         return "No items"
     for ln in d["lines"]:
@@ -282,6 +305,17 @@ def validate_for_save(d):
             return f"Quantity not confirmed: {ln['item']['name']}"
         if ln["item"]["code"] not in ITEMS_BY_CODE:
             return "Unknown item code"
+        if float(ln["qty"]) > MAX_QTY:
+            return f"Quantity too large: {ln['item']['name']}"
+        if ln.get("unit") not in UNITS:
+            return f"Unknown unit: {ln.get('unit')}"
     if not d.get("delivery"):
         return "Delivery date missing"
+    try:
+        from datetime import date
+        when = date.fromisoformat(str(d["delivery"].get("date")))
+    except (TypeError, ValueError):
+        return "Delivery date not valid"
+    if not -1 <= (when - today()).days <= 60:
+        return "Delivery date too far"
     return None

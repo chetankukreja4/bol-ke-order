@@ -22,6 +22,7 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 | `SARVAM_API_KEY` | Optional | Speech-to-text (Sarvam `saaras:v4`) for the live mic and uploaded recordings. Without it, the live mic uses the browser's speech recognition and uploads show "Speech key not set". |
 | `PORT` | Set by most hosts | Port to listen on. Default `8000`. |
 | `DB_PATH` | Optional | Default `/data/orders.db`. |
+| `BKO_PIN` | Recommended on a public URL | A shop PIN. When set, the app asks for it once on each phone. Without it anyone with the link can see orders. |
 
 Put keys in the host's "secrets" or "environment" screen. Never put them in the repo.
 

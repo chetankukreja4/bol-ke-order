@@ -114,12 +114,12 @@ async def transcribe_file(src: str) -> dict:
         raise KeyNotSet("SARVAM_API_KEY not set")
     if shutil.which("ffmpeg") is None:
         raise AudioError("ffmpeg not installed")
-    secs = duration_seconds(src)
+    secs = await asyncio.to_thread(duration_seconds, src)  # ffprobe/ffmpeg must not block the server
     if secs > MAX_SECONDS:
         raise AudioError("Recording is longer than 10 minutes")
     workdir = tempfile.mkdtemp(prefix="bko_")
     try:
-        chunks = split_audio(src, workdir)
+        chunks = await asyncio.to_thread(split_audio, src, workdir)
         sem = asyncio.Semaphore(4)
         async with httpx.AsyncClient(timeout=60) as client:
             async def run(p):

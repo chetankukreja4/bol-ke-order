@@ -263,8 +263,9 @@ def test_dispatch_by_order_number():
                  f"{a['id']} number wala rickshaw se gaya", f"#{a['id']} auto"):
         r = dp(said)
         assert r["ok"] and [x["id"] for x in r["orders"]] == [a["id"]] and r["orders"][0]["party"] == "Bittu Store", said
-    # the party name alone still means the latest open order
-    assert dp("Bittu ka maal tempo se")["orders"][0]["id"] == b["id"]
+    # the party name alone with two open orders: the app asks which, it never picks one
+    r = dp("Bittu ka maal tempo se")
+    assert not r["ok"] and f"#{a['id']}" in r["say"] and f"#{b['id']}" in r["say"]
     # wrong party for that number, unknown number, already sent
     assert "ka hai" in dp(f"Gupta ji ka order {a['id']} truck se")["say"]
     assert "nahi mila" in dp("order 999 truck se")["say"]

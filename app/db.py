@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 
 
 NEW_ORDER_COLUMNS = [("stats", "TEXT"), ("seconds_to_confirm", "REAL"),
-                     ("wrong_reason", "TEXT"), ("wrong_at", "TEXT")]
+                     ("wrong_reason", "TEXT"), ("wrong_at", "TEXT"),
+                     ("draft_id", "TEXT")]  # one draft = one order, even if Confirm is tapped twice
 
 
 def _conn():
@@ -83,17 +84,22 @@ def save_order(draft):
     lines = draft["lines"]
     now = datetime.now(IST)
     stats = draft.get("stats") if isinstance(draft.get("stats"), dict) else None
+    draft_id = str(draft.get("draft_id") or "")[:40] or None
     with _conn() as c:
+        if draft_id:  # a second tap or a network retry: the same order back, not a new one
+            r = c.execute("SELECT id FROM orders WHERE draft_id=?", (draft_id,)).fetchone()
+            if r:
+                return get_order(r["id"], c)
         cur = c.execute(
             "INSERT INTO orders (party, party_code, items, quantities, units, delivery_date, heard_text, created_at,"
-            " stats, seconds_to_confirm) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " stats, seconds_to_confirm, draft_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (draft["party"]["party"]["name"], draft["party"]["party"]["code"],
              json.dumps([{"code": l["item"]["code"], "name": l["item"]["name"]} for l in lines]),
              json.dumps([l["qty"] for l in lines]),
              json.dumps([l["unit"] for l in lines]),
              draft["delivery"]["date"], draft.get("heard", ""),
              now.isoformat(timespec="seconds"),
-             json.dumps(stats) if stats else None, _seconds_since(stats, now)))
+             json.dumps(stats) if stats else None, _seconds_since(stats, now), draft_id))
         return get_order(cur.lastrowid, c)
 
 
@@ -106,6 +112,21 @@ def get_order(order_id, c=None):
 def list_orders(limit=50):
     with _conn() as c:
         return [_row(r) for r in c.execute("SELECT * FROM orders ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def list_orders_for_ui(dispatched_limit=200):
+    """Every order still waiting to go, plus the latest dispatched ones."""
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM orders WHERE status='confirmed' OR id IN "
+                         "(SELECT id FROM orders WHERE status!='confirmed' ORDER BY id DESC LIMIT ?) ORDER BY id DESC",
+                         (dispatched_limit,))
+        return [_row(r) for r in rows]
+
+
+def open_orders(party_code):
+    with _conn() as c:
+        return [_row(r) for r in c.execute(
+            "SELECT * FROM orders WHERE party_code=? AND status='confirmed' ORDER BY id DESC", (party_code,))]
 
 
 def latest_open_order(party_code):
@@ -127,6 +148,13 @@ def mark_wrong(order_id, reason):
     with _conn() as c:
         n = c.execute("UPDATE orders SET wrong_reason=?, wrong_at=? WHERE id=?",
                       (reason, datetime.now(IST).isoformat(timespec="seconds"), order_id)).rowcount
+        return get_order(order_id, c) if n else None
+
+
+def clear_wrong(order_id):
+    """Undo a "Galat nikla" tapped by mistake."""
+    with _conn() as c:
+        n = c.execute("UPDATE orders SET wrong_reason=NULL, wrong_at=NULL WHERE id=?", (order_id,)).rowcount
         return get_order(order_id, c) if n else None
 
 

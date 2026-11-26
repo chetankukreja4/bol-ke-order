@@ -19,8 +19,8 @@ from .textnorm import WEAK_NUMBER_WORDS, norm, parse_number_at
 IST = timezone(timedelta(hours=5, minutes=30))
 
 _UNIT_WORDS = {norm(w): u for u, ws in UNITS.items() for w in ws}
-_ALT_WORDS = {"ya", "or", "yaa", "-", "to"}
-_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur| and | plus | phir | fir | uske baad | sath mein | saath mein ")
+_ALT_WORDS = {"ya", "or", "yaa", "-", "to", "se"}  # "10 se 12 carton" = 10 or 12: ask
+_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur| and | plus | phir | fir | uske baad | sath mein | saath mein ")
 _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "price", "discount",
                                "rupay", "rupaye", "rupee", "rs", "percent", "kam", "mehnga",
                                "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment"]}
@@ -62,22 +62,35 @@ def today():
     return datetime.now(IST).date()
 
 
+_NOT_WORDS = {"nahi", "nahin", "nai", "na", "mat", "not", "no"}
+
+
 def parse_date(text: str):
-    """Returns {"date": "YYYY-MM-DD", "label": "kal", "heard": ...} or None."""
-    t = f" {norm(text)} "
+    """Returns {"date": "YYYY-MM-DD", "label": "kal", "heard": ...} or None.
+    The day said last wins ("aaj order de raha hun, kal bhejna" = kal), and a
+    day followed by "nahi" is dropped ("kal nahi parso" = parso)."""
+    toks = norm(text).split()
+    found = []  # (position, date, label, heard)
     for days, words in _DAY_WORDS.items():
         for w in words:
-            if f" {norm(w)} " in t:
-                d = today() + timedelta(days=days)
-                return {"date": d.isoformat(), "label": w if w in ("aaj", "kal", "parso") else
-                        {0: "aaj", 1: "kal", 2: "parso"}[days], "heard": w}
+            ww = norm(w).split()
+            for i in range(len(toks) - len(ww) + 1):
+                if toks[i:i + len(ww)] == ww:
+                    d = today() + timedelta(days=days)
+                    label = w if w in ("aaj", "kal", "parso") else {0: "aaj", 1: "kal", 2: "parso"}[days]
+                    found.append((i, len(ww), d, label, w))
     for wd, words in _WEEKDAYS.items():
         for w in words:
-            if f" {norm(w)} " in t:
-                ahead = (wd - today().weekday()) % 7 or 7
-                d = today() + timedelta(days=ahead)
-                return {"date": d.isoformat(), "label": words[0], "heard": w}
-    return None
+            ww = norm(w).split()
+            for i in range(len(toks) - len(ww) + 1):
+                if toks[i:i + len(ww)] == ww:
+                    ahead = (wd - today().weekday()) % 7 or 7
+                    found.append((i, len(ww), today() + timedelta(days=ahead), words[0], w))
+    kept = [f for f in found if not (f[0] + f[1] < len(toks) and toks[f[0] + f[1]] in _NOT_WORDS)]
+    if not kept:
+        return None
+    _, _, d, label, heard = max(kept, key=lambda f: f[0])
+    return {"date": d.isoformat(), "label": label, "heard": heard}
 
 
 _DATE_TOKENS = {norm(w) for ws in list(_DAY_WORDS.values()) + list(_WEEKDAYS.values()) for w in ws}
@@ -152,11 +165,27 @@ def _condition(toks):
     return "agar " + " ".join(dict.fromkeys(words))
 
 
+def _parties_named(clauses):
+    """Every party named clearly in the clauses, in order ("ABC ko ..., Gupta ko ...")."""
+    found = []
+    for clause in clauses:
+        res, _ = find_party(clause)
+        if res["status"] == "ok" and res["party"]["code"] not in [p["code"] for p in found]:
+            found.append(res["party"])
+    return found
+
+
 def extract_rules(text: str):
     party_res, party_phrase = find_party(text)
     party_tokens = set(party_phrase.split()) if party_phrase else set()
+    clauses = _SPLIT_RE.split(f" {text} ")
+    named = _parties_named(clauses)
+    two_parties = len(named) > 1
+    if two_parties:  # one order is for one party: ask, never merge them silently
+        party_res = {"status": "choose", "party": None, "options": named}
+        party_tokens = {t for p in named for t in norm(p["name"]).split()} | party_tokens
     lines, last_item = [], None
-    for clause in _SPLIT_RE.split(f" {text} "):
+    for clause in clauses:
         toks = _tokens(clause)
         if not toks:
             continue
@@ -171,7 +200,13 @@ def extract_rules(text: str):
                 i += 1
         if not spans:
             # no quantity: rate questions and small talk are not lines, but remember the item they name
-            last_item = _named_item(toks, party_tokens) or last_item
+            named_item = _named_item(toks, party_tokens)
+            last_item = named_item or last_item
+            # "ABC ko Lux bhejna kal": an item with no quantity is a line, and the app asks "kitna?"
+            if named_item and not _is_bargain(toks) and not (_QUESTION_WORDS | {"kitna", "kitne", "kaisa", "kaise"}) & set(toks) \
+                    and not _already_listed(named_item, lines):
+                lines.append({"heard": " ".join(toks), "item_text": " ".join(named_item),
+                              "qty_values": [], "unit": None, "note": None})
             continue
         if _is_bargain(toks) and not _condition(toks) and not any(
                 _clean_item(toks[q["end"]:]) or _REF & set(toks) for _, q in spans):
@@ -203,14 +238,35 @@ def extract_rules(text: str):
                 "unit": q["unit"],
                 "note": cond,
             })
-    return {"party": party_res, "delivery": parse_date(text), "lines": lines}
+    # an item named first and given a quantity later ("Parle-G ... usmein das peti") is one line
+    lines = [ln for n, ln in enumerate(lines)
+             if ln["qty_values"] or not _already_listed(ln["item_text"].split(), [x for x in lines if x["qty_values"]])]
+    return {"party": party_res, "delivery": parse_date(text), "lines": lines, "two_parties": two_parties}
+
+
+def _already_listed(words, lines):
+    """The same item already has a line (a call often names it again without a quantity)."""
+    code = (match_item(" ".join(words)).get("item") or {}).get("code")
+    return bool(code) and any((match_item(ln["item_text"]).get("item") or {}).get("code") == code for ln in lines)
+
+
+_CONFIRM_PHRASES = ["haan pakka", "han pakka", "ha pakka", "pakka", "confirm", "save karo", "save",
+                    "theek hai save", "done", "yes confirm", "bilkul sahi", "sahi hai", "haan sahi"]
+_QUESTION_WORDS = {"kya", "kyaa", "kyun", "?"}
 
 
 def is_confirm(text: str) -> bool:
-    t = f" {norm(text)} "
-    return any(f" {norm(w)} " in t for w in
-               ["haan pakka", "han pakka", "ha pakka", "pakka", "confirm", "save karo", "save",
-                "theek hai save", "done", "yes confirm", "bilkul sahi", "sahi hai", "haan sahi"])
+    """'haan pakka' saves. 'pakka nahi', 'save mat karo', 'sahi hai kya' never do."""
+    raw = text or ""
+    t = f" {norm(raw)} "
+    toks = t.split()
+    if not any(f" {norm(w)} " in t for w in _CONFIRM_PHRASES):
+        return False
+    if _NOT_WORDS & set(toks) or {"ruko", "wait", "abhi nahi"} & set(toks):
+        return False
+    if raw.strip().endswith("?") or _QUESTION_WORDS & set(toks):
+        return False
+    return True
 
 
 def is_correction(text: str) -> bool:
@@ -289,6 +345,27 @@ def split_joined_number(n: int, open_ids, count=None):
 
     walk(digits, [])
     return found
+
+
+def is_leave_it(text: str) -> bool:
+    """'rehne do', 'chhodo', 'cancel': change nothing."""
+    t = f" {norm(text)} "
+    return any(f" {w} " in t for w in _CANCEL_WORDS)
+
+
+def quantities_in(text: str):
+    """Numbers that are really quantities: a small word like "do" or "ek" only
+    counts before a unit ("do carton"), so "rehne do" is not 2."""
+    toks = _tokens(text)
+    out, i = [], 0
+    while i < len(toks):
+        v, used = _is_qty_start(toks, i)
+        if v is None:
+            i += 1
+            continue
+        out.append(v)
+        i += used
+    return out
 
 
 def is_cancel(text: str) -> bool:

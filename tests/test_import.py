@@ -62,7 +62,7 @@ def test_simple_csv_and_skips():
 def test_units_never_fail_the_file():
     csv = "name,unit\nA one,Kgs\nB two,Bori\nC three,\nD four,Dozen\n"
     items, _ = to_items(read_table("u.csv", csv.encode()))
-    assert [i["unit"] for i in items] == ["kg", "bag", "piece", "piece"]
+    assert [i["unit"] for i in items] == ["kg", "bag", "piece", "dozen"]  # dozen is a unit now
 
 
 def test_xls_refused():

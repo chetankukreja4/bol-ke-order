@@ -15,6 +15,7 @@ async function api(path, opts = {}, tries = 3) {
       const r = await fetch(path, opts);
       const data = await r.json().catch(() => ({}));
       if (!r.ok) {
+        if (r.status === 401 && data.error === 'pin' && await askPin()) { i--; continue; } // shop PIN, then retry
         if (r.status >= 500 && r.status < 502 && i < tries - 1) { await sleep(800 * (i + 1)); continue; }
         const e = new Error(data.detail || data.message || `HTTP ${r.status}`);
         e.status = r.status; e.data = data; throw e;
@@ -27,7 +28,18 @@ async function api(path, opts = {}, tries = 3) {
     }
   }
 }
-const post = (p, body) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+// Optional shop PIN (BKO_PIN on the server): asked once, then kept as a cookie.
+let pinTries = 0;
+async function askPin() {
+  if (pinTries++ > 3) return false;
+  const pin = window.prompt('Shop PIN daalein');
+  if (!pin) return false;
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }) });
+  if (r.ok) { pinTries = 0; return true; }
+  toast('PIN galat hai');
+  return askPin();
+}
+const post = (p, body) => api(p,{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 function toast(msg, ms = 3000) {
   const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
@@ -316,7 +328,9 @@ async function parseTranscript() {
     const d = await post('/api/parse', {
       text, kind: state.textKind || null, source: state.source || 'typed', test: $('testOrder').checked,
       elapsed: state.startedAt ? (Date.now() - state.startedAt) / 1000 : null,
+      carry: state.carry || null, // after "Back": same order, same clock
     });
+    state.carry = null;
     state.draft = d;
     if (d.notice === 'unclear') {
       if (state.textKind === 'transcript') return toast('Is transcript mein koi item nahi mila. Text check karein.', 4000);
@@ -376,6 +390,9 @@ async function sendAnswer(text) {
 
 async function saveOrder() {
   if (!state.draft?.ready) return toast('Pehle sawaal ka jawab dein');
+  if (state.saving) return; // a second tap (or "haan pakka" + tap) must not save twice
+  state.saving = true;
+  $('cfConfirm').disabled = true;
   try {
     state.order = await post('/api/orders', { draft: state.draft });
     state.startedAt = null; // the next order starts its own clock
@@ -383,6 +400,9 @@ async function saveOrder() {
     speak(`Order ${state.order.id} save ho gaya.`);
   } catch (e) {
     toast(e.network ? 'Network nahi hai. Order abhi save nahi hua, dobara dabayein.' : e.message, 4000);
+    $('cfConfirm').disabled = !state.draft?.ready; // a retry sends the same draft: still one order
+  } finally {
+    state.saving = false;
   }
 }
 
@@ -410,7 +430,14 @@ const WRONG = { item: 'Item galat', qty: 'Quantity galat', party: 'Party galat',
 function renderWrong(open) {
   const o = state.order, box = $('dnWrong');
   if (o.wrong_reason) {
-    box.innerHTML = `<div class="status bad">✗ Galat nikla: ${esc(WRONG[o.wrong_reason] || o.wrong_reason)}</div>`;
+    box.innerHTML = `<div class="status bad">✗ Galat nikla: ${esc(WRONG[o.wrong_reason] || o.wrong_reason)}
+      <button class="btn btn-outline btn-xs" id="wrongUndo">Undo</button></div>`;
+    $('wrongUndo').onclick = async () => {
+      try {
+        state.order = await api(`/api/orders/${o.id}/wrong`, { method: 'DELETE' });
+        renderWrong(); toast('Hata diya');
+      } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message); }
+    };
     return;
   }
   if (!open) {
@@ -540,7 +567,7 @@ function initTheme() {
 
 // ------------------------------------------------------------------ misc
 const MODES = ['rickshaw', 'tempo', 'truck', 'auto', 'self pickup'];
-const orderSummary = (o) => o.lines.map((l) => `${l.qty} ${l.unit} ${esc(l.name)}`).join(', ');
+const orderSummary = (o) => o.lines.map((l) => `${esc(l.qty)} ${esc(l.unit)} ${esc(l.name)}`).join(', ');
 const badge = (o) => `<span class="badge ${o.status}">${o.status === 'confirmed' ? 'pending' : 'dispatched'}${o.dispatch_mode ? ' · ' + esc(o.dispatch_mode) : ''}</span>`;
 const empty = (msg) => `<div class="empty">${msg}</div>`;
 
@@ -576,9 +603,17 @@ function renderPending() {
       <div class="opts small">${MODES.map((m) => `<button class="btn btn-outline btn-xs" data-id="${o.id}" data-mode="${m}">${m}</button>`).join('')}</div></div></div>`).join('')
     : empty(state.orders ? 'All orders have gone out. 🎉' : 'Could not load orders (offline?).');
   box.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => {
+    // one tap only proposes; "Haan, pakka" sends (a mis-tap must not mark an order as gone)
     const order = state.orders.find((o) => String(o.id) === b.dataset.id);
     state.dispatch = { ok: true, orders: [order], mode: b.dataset.mode };
-    doDispatch();
+    const ds = $('dispatchBox');
+    ds.classList.remove('hidden');
+    ds.innerHTML = `<p><b>#${esc(order.id)} ${esc(order.party)}, ${esc(b.dataset.mode)} se gaya. Pakka?</b></p>
+      <ul class="ds-items"><li>${orderSummary(order)}</li></ul>
+      <div class="actions"><button class="btn" id="dsYes">✔ Haan, pakka</button><button class="btn btn-outline" id="dsNo">Cancel</button></div>`;
+    $('dsYes').onclick = doDispatch;
+    $('dsNo').onclick = () => { state.dispatch = null; ds.classList.add('hidden'); };
+    ds.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 }
 
@@ -779,7 +814,7 @@ async function init() {
   $('trAgain').onclick = () => { clearTimeout(state.autoTimer); show('order'); };
   $('ansGo').onclick = () => { sendAnswer($('ansTyped').value); $('ansTyped').value = ''; };
   $('cfConfirm').onclick = saveOrder;
-  $('cfBack').onclick = () => { showTranscript(state.draft?.heard || '', false, 'Text theek karein, phir Samjho dabayein.'); clearTimeout(state.autoTimer); };
+  $('cfBack').onclick = () => { state.carry = state.draft?.stats || null; showTranscript(state.draft?.heard || '', false, 'Text theek karein, phir Samjho dabayein.'); clearTimeout(state.autoTimer); };
   $('dnPrint').onclick = () => window.print();
   $('dnNew').onclick = () => { state.draft = null; state.blob = null; state.startedAt = null; show('order'); };
   const openCard = (id, field) => {

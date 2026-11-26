@@ -186,3 +186,4 @@ button.row-card:hover { border-color: var(--green); }
 .heard-note:empty { display: none; }
 .ds-items { margin: 4px 0 0; padding-left: 18px; font-size: 15px; }
 .ds-items li { margin: 2px 0; }
+.line .flag.cond { color: var(--outline-ink); font-weight: 600; }

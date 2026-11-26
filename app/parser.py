@@ -3,14 +3,17 @@
 Turns "ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena" into
     party_text="abc wale", delivery="kal",
     lines=[{item_text:"sabun", qty_values:[10], unit:"carton"}, ...]
-Small talk and bargaining clauses (rate, discount, bhav) are dropped.
+Small talk and pure bargaining clauses (rate, discount, bhav) are dropped, but
+a clause with a quantity is kept even if it mentions the rate.
+"uski bees peti" uses the item named just before (even in a rate question), and
+"agar ... toh das, nahi toh paanch" becomes one line with two quantities (asked).
 No LLM is used anywhere: the app keeps working if any AI service goes away.
 """
 import re
 from datetime import datetime, timedelta, timezone
 
 from .catalog import DISPATCH_MODES, UNITS
-from .matcher import find_party
+from .matcher import find_party, match_item
 from .textnorm import WEAK_NUMBER_WORDS, norm, parse_number_at
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -30,6 +33,19 @@ _STOP = {norm(w) for w in [
     "me", "se", "tak", "to", "ek", "kar", "karna", "karo", "dijiyega", "dedo", "de do", "send",
     "deliver", "delivery", "bhejiye", "pe", "par", "liye", "wahi", "vahi", "same", "naya", "nahi",
     "no", "galat", "sorry", "matlab", "mtlb", "aap", "ap", "hum", "humko", "mujhe", "unko", "ab"]}
+
+# Words that point back to the item said just before ("uski bees peti").
+_REF = {norm(w) for w in ["uski", "uska", "uske", "usmein", "usme", "usmen", "isme", "ismein", "ismen",
+                          "iski", "iska", "iske", "wahi", "vahi", "wohi", "vohi", "same", "wo", "woh", "vo"]}
+# Filler in conditions and questions; never part of an item name.
+_FILLER = {norm(w) for w in [
+    "agar", "agr", "kuch", "kami", "peshi", "ayi", "aayi", "aaya", "aya", "toh", "tab", "sirf", "bas",
+    "warna", "varna", "baaki", "baki", "mere", "mera", "meri", "kya", "kis", "kaisa", "kaise", "kaun",
+    "chal", "raha", "rha", "rahi", "hua", "hui", "ho", "gaya", "gayi", "kaam", "cheez", "batao", "bata",
+    "achha", "maalik", "malik", "haal", "dekh", "dekho", "lagta", "lage", "lag", "kitna", "kitne"]}
+# A clause that starts like this gives the other quantity for the line before.
+_ELSE_STARTS = [norm(w).split() for w in ["nahi toh", "nahi to", "nahin toh", "nahin to", "nahi tho",
+                                          "warna", "varna", "ya phir", "ya fir", "otherwise"]]
 
 _DAY_WORDS = {
     0: ["aaj", "aj", "today", "abhi", "turant"],
@@ -109,16 +125,40 @@ def _is_bargain(toks):
 
 
 def _clean_item(toks):
-    return [t for t in toks if t not in _STOP and t not in _DATE_TOKENS and t not in _UNIT_WORDS]
+    return [t for t in toks if t not in _STOP and t not in _DATE_TOKENS and t not in _UNIT_WORDS
+            and t not in _FILLER and t not in _REF and t not in _BARGAIN]
+
+
+def _named_item(toks, party_tokens):
+    """The catalog item a clause clearly names ("Amul ghee kya rate chal raha hai"), else None."""
+    words = _clean_item([t for t in toks if t not in party_tokens])
+    if not words:
+        return None
+    m = match_item(" ".join(words))
+    return words if m["status"] in ("ok", "choose") else None
+
+
+def _starts_with_else(toks):
+    return any(toks[:len(w)] == w for w in _ELSE_STARTS)
+
+
+def _condition(toks):
+    """'agar sasta rate chal raha hai toh ...' -> 'agar sasta rate chal raha hai'."""
+    if "agar" not in toks and "agr" not in toks:
+        return None
+    i = toks.index("agar") if "agar" in toks else toks.index("agr")
+    j = next((k for k in range(i + 1, len(toks)) if toks[k] in ("toh", "to", "tab")), len(toks))
+    words = [t for t in toks[i:j] if t not in ("agar", "agr")] or toks[i:j]
+    return "agar " + " ".join(dict.fromkeys(words))
 
 
 def extract_rules(text: str):
     party_res, party_phrase = find_party(text)
     party_tokens = set(party_phrase.split()) if party_phrase else set()
-    lines = []
+    lines, last_item = [], None
     for clause in _SPLIT_RE.split(f" {text} "):
         toks = _tokens(clause)
-        if not toks or _is_bargain(toks):
+        if not toks:
             continue
         # find quantity spans; each starts a new line
         spans, i = [], 0
@@ -130,18 +170,38 @@ def extract_rules(text: str):
             else:
                 i += 1
         if not spans:
+            # no quantity: rate questions and small talk are not lines, but remember the item they name
+            last_item = _named_item(toks, party_tokens) or last_item
             continue
+        if _is_bargain(toks) and not _condition(toks) and not any(
+                _clean_item(toks[q["end"]:]) or _REF & set(toks) for _, q in spans):
+            continue  # "das rupay kam karo": a price, not an order
+        # "..., nahi toh sirf paanch peti" -> second quantity for the line before
+        if lines and _starts_with_else(toks) and len(spans) == 1:
+            q = spans[0][1]
+            if not _clean_item(toks[q["end"]:]) and not _clean_item(toks[:spans[0][0]]):
+                prev = lines[-1]
+                prev["qty_values"] = list(dict.fromkeys(prev["qty_values"] + q["values"]))
+                prev["unit"] = prev["unit"] or q["unit"]
+                prev["heard"] += " / " + " ".join(toks)
+                continue
+        cond = _condition(toks)
         for n, (start, q) in enumerate(spans):
             stop = spans[n + 1][0] if n + 1 < len(spans) else len(toks)
             after = [t for t in toks[q["end"]:stop] if t not in party_tokens]
             item = _clean_item(after)
             if not item and n == 0:  # "sabun 10 carton" (item said first)
                 item = _clean_item([t for t in toks[:start] if t not in party_tokens])
+            if not item and last_item and (_REF & set(toks) or cond):  # "uski bees peti": the item said before
+                item = list(last_item)
+            elif item:
+                last_item = item
             lines.append({
                 "heard": " ".join(toks[start:stop]) if item else " ".join(toks),
                 "item_text": " ".join(item),
                 "qty_values": q["values"],
                 "unit": q["unit"],
+                "note": cond,
             })
     return {"party": party_res, "delivery": parse_date(text), "lines": lines}
 

@@ -56,6 +56,7 @@ Main rules (from the spec):
 - No LLM. All extraction, matching and number work is normal code (removed Claude on 27 Nov to keep one paid dependency).
 - Never guesses: "sabun" asks the brand; weak matches show top 3; "10 ya 12" asks; "Sharma ji" asks which Sharma. Uncertain lines are yellow with "Pakka nahi hoon."
 - "nahi, aath carton" changes only that line.
+- Real calls mix rate talk and conditions. A clause with a quantity is kept even if it says "rate"; a pure rate question is not a line but the item it names is remembered, so "uski bees peti" / "usmein ... das peti" use it (only when such a pointer word or "agar" is said; otherwise a missing item is asked, never filled in). "agar ... toh das, nahi toh paanch" becomes one line with two quantities, so the app asks "10 ya 5?". The condition is shown on the line ("❓ Shart: agar sasta rate ...") for staff to settle with the party.
 - Unclear audio → "Awaaz saaf nahi aayi, dobara bolein"; recording kept. 8 s silence → one gentle prompt. Network errors → retry; recording kept.
 - Prices and discounts are never changed or stored.
 - Consent note on the upload screen.
@@ -83,7 +84,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`):
 | `app/db.py` | SQLite `orders` and `items` tables (items seeded from the sample list once) |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (4 tabs: Order, Orders, Dispatch, Items), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (light + dark, bottom tab bar on phones). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
-| `tests/test_orders.py` | 42 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
+| `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -91,7 +92,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 42 tests (inside .venv or the container)
+pytest -q                          # 44 tests (inside .venv or the container)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -103,7 +104,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 42 tests pass (numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
+- 44 tests pass (rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
 - Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
 - In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
 - The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
@@ -152,6 +153,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| parser fix (after `948189e`) | Parser: keep order clauses that mention rate, "uski/usmein" point to the last item, "agar ... nahi toh" gives two quantities to ask; condition shown on the line |
 | `d5bc63c` | Dispatch keeps context between turns; Hindi "हां पक्का" works; find orders by number; several orders in one truck; split joined numbers like 345 |
 | `e33375e` | Parchi no longer prints the heard text; nicer dates |
 | `69e458d` | Four tabs (Order, Orders, Dispatch, Items); Items page backed by SQLite; Paste call transcript; Hindi title removed |

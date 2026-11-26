@@ -305,3 +305,30 @@ def test_dispatch_several_orders_in_one_truck():
     assert r["action"] == "confirm" and [o["id"] for o in r["orders"]] == ids
     # said "teeno" but only two numbers heard -> ask again
     assert "number dobara" in dp(f"order {ids[0]} aur {ids[1]} teeno truck se")["say"]
+
+
+CONDITIONAL_CALL = ("Kya haal hai mere maalik? Achha ek cheez batao, Amul ghee kya rate chal raha hai? "
+                    "Aur ek kaam karna, agar agar sasta rate chal raha hai toh mere uski bees peti kar dena. "
+                    "Aur Parle-G biscuit, woh kis rate chal raha hai? Agar usmein kuch kami peshi aayi hai toh "
+                    "das peti karna, nahi toh sirf paanch peti karna. Baaki aur batao kya. Sharma Traders, kal bhej dena.")
+
+
+def test_rate_talk_pronouns_and_if_else_quantities():
+    d = build_draft(CONDITIONAL_CALL)
+    got = [((l["item"] or {}).get("code"), l["qty"], l["qty_alts"], l["unit"]) for l in d["lines"]]
+    # "uski bees peti" = Amul Ghee (said in the rate question before), kept although the clause says "rate"
+    # "agar ... toh das, nahi toh paanch" = one Parle-G line with two quantities -> the app asks which
+    assert got == [("GH01", 20, [], "carton"), ("BS01", None, [10, 5], "carton")], got
+    assert d["lines"][0]["note"] and "sasta" in d["lines"][0]["note"]
+    assert d["lines"][1]["note"] and "kami" in d["lines"][1]["note"]
+    assert d["question"]["type"] == "qty" and "10 ya 5" in d["question"]["text"]
+    # a pure rate question is still not an order line
+    assert build_draft("Gupta ji, Amul ghee kya rate chal raha hai?")["lines"] == []
+
+
+def test_missing_item_is_not_filled_from_the_line_before():
+    d = build_draft("Gupta ji ko 10 carton Lux, 5 carton, kal")
+    assert d["lines"][0]["item"]["code"] == "SP01"
+    assert d["lines"][1]["item"] is None and d["lines"][1]["uncertain"]  # asked, not guessed as Lux
+    d = build_draft("Gupta ji, 10 carton Lux, uski 5 carton aur, kal")
+    assert [l["item"]["code"] for l in d["lines"] if l["item"]] == ["SP01", "SP01"]

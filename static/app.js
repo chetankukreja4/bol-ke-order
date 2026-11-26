@@ -328,10 +328,11 @@ function lineHtml(ln) {
   const qty = ln.qty !== null && ln.qty !== undefined ? ln.qty : (ln.qty_alts.length ? ln.qty_alts.join(' / ') : '?');
   const name = ln.item ? ln.item.name : (ln.group ? `${ln.group}?` : (ln.item_text || '?'));
   const flag = ln.uncertain ? '<div class="flag">⚠ Pakka nahi hoon.</div>' : '';
+  const note = ln.note ? `<div class="flag cond">❓ Shart: "${esc(ln.note)}" — party se poochh kar tay karein</div>` : '';
   return `<div class="line ${ln.uncertain ? 'unsure' : ''}">
     <div class="qty">${esc(qty)}<small>${esc(ln.unit || '')}</small></div>
     <div class="name">${esc(name)}${ln.item ? ` <small>(${esc(ln.item.code)})</small>` : ''}</div>
-    <div class="heard-as">heard: "${esc(ln.heard)}"</div>${flag}</div>`;
+    <div class="heard-as">heard: "${esc(ln.heard)}"</div>${note}${flag}</div>`;
 }
 
 let answerMic;

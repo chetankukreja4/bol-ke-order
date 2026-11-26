@@ -38,6 +38,7 @@ def make_line(raw):
         "qty_alts": vals if len(vals) > 1 else [],
         "unit": raw["unit"] or (m["item"]["unit"] if m["item"] else None),
         "heard_unit": bool(raw["unit"]),
+        "note": raw.get("note"),  # "agar sasta rate ..." -- shown on the line, never decided for the shop
     }
     return _refresh_line(line)
 

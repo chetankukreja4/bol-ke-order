@@ -85,3 +85,27 @@ def test_real_voice_makes_audio():
     tts.reset()
     audio, kind = tts._synthesize(tts.to_speech_text("Sahi hai? Haan pakka bolein."))
     assert kind in ("audio/mpeg", "audio/wav") and len(audio) > 5000
+
+
+@pytest.mark.parametrize("text,want", [
+    ('Astral Elbow 1"', "Astral Elbow 1 इंच"),
+    ('Astral Tee 3/4"', "Astral Tee पौना इंच"),
+    ('Astral Socket 1/2"', "Astral Socket आधा इंच"),
+    ("Astral Bush 2x1''", "Astral Bush 2 बाय 1 इंच"),
+    ("Astral Bush 1 1/2x1''", "Astral Bush डेढ़ बाय 1 इंच"),
+    ("Astral Brass Ft Elbow 1*1/2", "Astral Brass Ft Elbow 1 बाय आधा"),
+    ("Astral Elbow 1'' 45*", "Astral Elbow 1 इंच 45 डिग्री"),
+    ("Astral Pipe 1.25' 6kg ISI", "Astral Pipe सवा 1 इंच 6 किलो ISI"),
+    ("Crompton Sumercible 1.5hp Water", "Crompton Sumercible डेढ़ hp Water"),
+    ("Astral Elbow 2 1/2''", "Astral Elbow ढाई इंच"),
+    ("Astral Bush 3.5''", "Astral Bush साढ़े 3 इंच"),
+])
+def test_sizes_are_said_the_shop_way(text, want):
+    """The voice said 'teen slash chaar' and 'do x ek', and dropped the inch."""
+    assert tts.to_speech_text(text) == want
+
+
+def test_quotes_round_what_was_heard_are_not_inches():
+    said = tts.to_speech_text("Pakka nahi hoon. 'mini champ 1' matlab Crompton Mini Champ 1, Crompton Mini Champ 2?")
+    assert "इंच" not in said and "'" not in said
+    assert tts.to_speech_text("Order 3, 4 aur 5 truck se gaye") == "Order 3, 4 और 5 truck से गए"

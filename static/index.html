@@ -212,10 +212,11 @@
     <div class="card-h">
       <p class="sub">Add the names customers really use ("sarson ka tel", "parle") as spoken names.</p>
       <div class="imports">
-        <label class="btn btn-outline btn-sm"><input id="impItems" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se items laayein</label>
-        <label class="btn btn-outline btn-sm"><input id="impParties" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se parties laayein</label>
+        <label class="btn btn-outline btn-sm"><input id="impItems" type="file" accept=".csv,.xlsx" hidden>⬆ Busy / Excel se items laayein</label>
+        <label class="btn btn-outline btn-sm"><input id="impParties" type="file" accept=".csv,.xlsx" hidden>⬆ Busy / Excel se parties laayein</label>
       </div>
     </div>
+    <p class="fine">Busy nahi hai? Khaali Excel bharein: <a href="/api/items/template.xlsx">⬇ Items template</a> · <a href="/api/parties/template.xlsx">⬇ Parties template</a>. Bhar kar upar ke button se laayein.</p>
     <div id="impBox" class="clarify hidden" aria-live="polite"></div>
     <label class="fieldlabel" for="itemSearch">Search items</label>
     <input id="itemSearch" type="search" placeholder="Search by name, code or spoken name" autocomplete="off">
@@ -223,7 +224,7 @@
   </section>
   <section class="card">
     <div class="card-h"><h3>Parties <span class="count" id="partiesCount"></span></h3></div>
-    <p class="sub">Badalne ke liye Busy se nayi list laayein (Sundry Debtors).</p>
+    <p class="sub">Badalne ke liye Busy (Sundry Debtors) ya Excel template se nayi list laayein.</p>
     <label class="fieldlabel" for="partySearch">Search parties</label>
     <input id="partySearch" type="search" placeholder="Search party" autocomplete="off">
     <div id="partiesList" class="list"></div>

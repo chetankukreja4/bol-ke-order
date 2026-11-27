@@ -1,6 +1,6 @@
 # Deploying Bol-ke-Order
 
-The app is one Docker container. Any cloud that can build a Dockerfile from a GitHub repo can run it, including Dostack Cloud, Render, Railway, Fly.io, DigitalOcean App Platform or a plain VPS.
+The app is one Docker container. Any host that can build a Dockerfile from a GitHub repo can run it: Render (`render.yaml` is ready), Railway, Fly.io, DigitalOcean App Platform or a plain VPS. The hackathon rules say "You host it yourself" and the live link is optional, but the phone microphone needs HTTPS, so the shop test needs a deploy. (dostack.ai's home page looked like an AI app builder taking early-access sign-ups, not a Docker host; check before planning on it.)
 
 ## What the host needs
 
@@ -12,7 +12,7 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 | Health check | `GET /healthz` returns `{"ok": true}` |
 | HTTPS | Required for the live microphone in the browser. Turn on the host's free HTTPS / SSL. |
 | Disk | Mount a persistent volume at `/data` (orders live in `/data/orders.db`). Without it, orders reset on every redeploy. 1 GB is plenty. |
-| Memory | 512 MB should be enough; the voice model (64 MB file) is loaded on the first spoken line. Not measured in Docker yet. |
+| Memory | 512 MB should be enough; the voice model (64 MB file) is loaded on the first spoken line. Not measured on a host yet: watch the first day. |
 | Env vars | All optional. See below. |
 
 ### Environment variables
@@ -28,14 +28,14 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 
 Put keys in the host's "secrets" or "environment" screen. Never put them in the repo.
 
-## Steps for a Docker-from-GitHub host (Dostack Cloud or similar)
+## Steps for a Docker-from-GitHub host
 
 1. Sign in to the host and connect your GitHub account.
 2. Create a new app / service → choose **Dockerfile** (or "Docker") as the build type → pick the repo `bol-ke-order`, branch `main`.
 3. Set the port to `8000` (or leave it if the host sets `$PORT`).
 4. Add a persistent volume mounted at `/data`.
 5. Set the health check path to `/healthz`.
-6. Add `SARVAM_API_KEY` if you have it.
+6. Add `BKO_PIN` (a shop PIN) and `SARVAM_API_KEY` if you have it. Do not set `BKO_DEMO`.
 7. Deploy. Open the HTTPS URL on your phone in Chrome and tap **Order bolo**.
 8. Turn on auto-deploy from `main` so each push updates the app.
 
@@ -59,17 +59,20 @@ sudo docker compose up -d --build
 
 Then put Caddy or Nginx in front for HTTPS (the browser mic does not work over plain http, except on localhost).
 
-## Render (backup option)
+## Render
 
-New → Blueprint → pick the repo. `render.yaml` is already set up. Free tier disk is temporary.
+New → Blueprint → pick the repo. `render.yaml` sets the Docker build and the `/healthz` check, and asks for `SARVAM_API_KEY` and `BKO_PIN`.
+
+- Render builds from the `Dockerfile` (not `docker-compose.yml`) and sets `$PORT`; the app already listens on it.
+- The Dockerfile's `VOLUME` and `HEALTHCHECK` are ignored on Render; the health check comes from `render.yaml`.
+- **Free plan: the disk is temporary** (orders are lost on a restart or redeploy) and the server sleeps after about 15 minutes idle (the first request then takes about a minute). Fine for a demo link. For the shop pilot use a paid plan with a Disk mounted at `/data`.
+- If saving fails with a permission error after adding a Disk, the disk is not writable by the container's `appuser`; check Render's logs (not seen yet).
 
 ## After deploying, check
 
-- Items tab → "Busy se items laayein" and "Busy se parties laayein" with the shop's Busy export (.xlsx or CSV). The preview shows what will be loaded; "Haan" replaces the sample lists.
-- Pilot tab opens and shows 0 orders on a fresh `/data`.
-
-- `https://<your-url>/healthz` shows `{"ok":true}`
-- Home screen loads; the header shows which keys are set
-- "Try sample phrases" → tap the first one → Confirm screen asks "Kaun sa soap brand?"
-- Tap Lux → Confirm → parchi appears → "CSV for billing" downloads
-- On a phone over HTTPS: hold **Order bolo** and speak an order
+- `https://<your-url>/healthz` shows `{"ok":true}`.
+- The home screen loads and asks for the PIN once; the header shows which keys are set.
+- "Try sample phrases" → the first one → "Kaun sa soap brand?" → Lux → Confirm → parchi; "CSV for billing" downloads.
+- On a phone over HTTPS: hold **Order bolo** and speak an order; the read-back is in the local Hindi voice.
+- Items tab → "Busy / Excel se items laayein" and "Busy / Excel se parties laayein" with the shop's file (or the blank Excel template, filled). Check the preview, then "Haan": it replaces the sample lists.
+- Pilot tab shows 0 orders on a fresh `/data`.

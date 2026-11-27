@@ -23,19 +23,38 @@ jobs:
           BKO_NO_DOTENV: "1"
         run: pytest -q
 
-  docker:
+  compose:
+    # Exactly what the organisers do: start the app with docker compose, with no keys,
+    # and the main screen must open.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t bol-ke-order .
-      - name: Start with no keys and check /healthz
+      - name: docker compose up (no keys)
+        run: docker compose up -d --build
+      - name: Health check answers
         run: |
-          docker run -d --name bko -p 8000:8000 bol-ke-order
-          for i in $(seq 1 30); do
-            if curl -fs http://localhost:8000/healthz; then echo; echo "healthy"; exit 0; fi
+          for i in $(seq 1 45); do
+            if curl -fs http://localhost:8000/healthz; then echo; exit 0; fi
             sleep 2
           done
-          docker logs bko
+          docker compose logs
           exit 1
+      - name: Main screen opens
+        run: |
+          curl -fs http://localhost:8000/ -o home.html
+          grep -q "<title>Bol-ke-Order</title>" home.html
+          grep -q 'id="micOrder"' home.html
+          curl -fs -o /dev/null http://localhost:8000/static/app.js
+          curl -fs -o /dev/null http://localhost:8000/static/style.css
+      - name: No key needed, and the app says so
+        run: |
+          curl -fs http://localhost:8000/api/config -o config.json
+          python3 -c "import json; c = json.load(open('config.json')); assert c['server_stt'] is False, c; assert c['stt_message'], c; print('key not set shown:', c['stt_message'])"
+      - name: A typed order works end to end
+        run: |
+          curl -fs -X POST http://localhost:8000/api/parse -H 'Content-Type: application/json'             -d '{"text": "ABC wale ko 10 carton Lux kal"}' -o draft.json
+          python3 -c "import json; d = json.load(open('draft.json')); assert d['ready'] and d['lines'][0]['item']['code'] == 'SP01', d; print('parsed:', d['readback'])"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs

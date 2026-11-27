@@ -107,7 +107,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **Docker build** (GitHub Actions, 27 Nov, PRs #1, #2, #3): the image builds (on `codex-look` and `improvements` it also downloads the voice model), starts with no keys, and `/healthz` answers. Docker is still not installed on the dev PC. Memory use on a 512 MB host is not measured.
+- **Docker** (GitHub Actions on every push: `docker compose up --build` with no keys, then the health check, the main screen and one typed order; first green on PRs #1, #2, #3 on 27 Nov): the image builds (on `codex-look` and `improvements` it also downloads the voice model), starts with no keys, and `/healthz` answers. Docker is still not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - 145 tests pass (on `improvements`: 9+1 review-fix and 8 improvement tests, 11 voice tests, 44 bug tests on `codex-look`, 28 on `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
 - Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
 - In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
@@ -166,6 +166,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| CI compose (branch `ci-compose`) | The Docker CI job now does what the organisers do: `docker compose up --build` with no keys, then `/healthz`, the main screen (`/`, app.js, style.css), "key not set" in `/api/config`, and one typed order through `/api/parse` |
 | Docker checked (branch `improvements`) | HANDOFF: the Docker build passes in CI; the CI row moved from section 2 to this change log |
 | CI (all branches) | `.github/workflows/tests.yml`: every push and PR runs `pytest` and builds the Docker image, starts it with no keys and checks `/healthz` |
 | review fixes 2 (branch `improvements`) | From the code review of the whole branch: an order that waited offline is never dropped (a refused one shows "order atka hai" and opens to fix), and the wait is not counted as order time (`offline_seconds`); Busy sub-groups like "Wholesale Parties" stay customers (whole-word group check); grouped exports read sub-group heading rows; PIN login allows 5 wrong tries per 10 minutes per address and never 500s on odd characters; late pending orders can be edited, and a new order with a past date says "pichhli hai"; the day can be changed by voice ("nahi, parso", or just "kal" when the date has passed); cancelled orders say "cancel ho chuka hai" in dispatch; item and party names keep their English reading in the voice. 145 tests; offline flow checked in the browser |

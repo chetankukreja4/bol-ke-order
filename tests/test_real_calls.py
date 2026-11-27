@@ -153,7 +153,7 @@ Theek hai ji, main pooch ke batata hoon sir."""
 
 
 def test_call_with_talk_guesses_nothing(pipe_shop):
-    d = build_draft(CALL_1)
+    d = build_draft(CALL_1, call=True)
     assert d["party"]["status"] == "missing"  # "ji sahab" is not Jain Sahab
     assert d["delivery"] is None  # "kal parson" was talk
     heard = " / ".join(ln["heard"] for ln in d["lines"])
@@ -177,7 +177,7 @@ Haan ji, theek hai, sab likh liya, ye order poora ho gaya bhai ji."""
 
 
 def test_sized_call_lines(pipe_shop):
-    d = build_draft(CALL_2)
+    d = build_draft(CALL_2, call=True)
     got = [(ln["qty"], ln["item"]["name"] if ln["item"] else None) for ln in d["lines"]]
     assert (30, 'Astral Elbow 1 1/4"') in got  # "elbow sawa inchi tees"
     cap = next(ln for ln in d["lines"] if ln["qty"] == 10)  # "hand cap do inch ke das": asks, End Cap 2" first

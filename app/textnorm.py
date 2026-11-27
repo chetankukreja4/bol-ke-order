@@ -98,11 +98,12 @@ def _sizes_written(t):
                lambda m: _dec(int(m[1]) + int(m[2]) / int(m[3])), t)
     t = re.sub(r"(?<![\d./])([1-9]|1[0-5])\s*/\s*(2|4|8|16)(?![\d/])",
                lambda m: _dec(int(m[1]) / int(m[2])) if int(m[1]) < int(m[2]) else m[0], t)
-    return re.sub(r"(\d)\s*(''|\"|”|″|’’|'|’)", r"\1 inch ", t)
+    t = re.sub(r"(\d)\s*mm(?![a-wyz])", r"\1 msize ", t)  # before "mm" is de-doubled to "m"
+    return re.sub(r"(?<![\"'“”‘’\d.])(\d+(?:\.\d+)?(?:x\d+(?:\.\d+)?)?)\s*(''|\"|”|″|’’|'|’)", r"\1 inch ", t)
 
 
 _INCH = {"inch", "inches", "inchi", "inchy", "inc", "incha", "inche"}
-_MM = {"mm", "m"}  # "mm" is "m" once letters are de-doubled
+_MM = {"msize"}  # "40mm" / "40 mm", marked before letters are de-doubled ("mm" -> "m")
 # pump ratings: "1hp", "1.1kw", "1ph", "12 stage" (a "1 hp" pump is not one piece)
 _RATING = {"hp": "hp", "kw": "kw", "ph": "ph", "phase": "ph", "stage": "stage", "stg": "stage", "st": "stage"}
 _KG = {"kg", "kilo", "kgs", "kilogram"}
@@ -111,7 +112,16 @@ _HALF_WORDS = {"sadhe": 0.5, "sade": 0.5, "sawa": 0.25, "sava": 0.25, "pauna": -
 _SIZE_NEAR = _INCH | _MM | _KG | _BY | set(_RATING) | set(_HALF_WORDS) | {"half"}
 
 
-_KG_CLASS_NEXT = {"isi", "ke", "wala", "wale", "vala", "vale"}
+_KG_CLASS_NEXT = {"ke", "ka", "wala", "wale", "vala", "vale"}
+
+
+def _class_next(toks, k):
+    """'6 kg ISI', or 'das kilo ke aath pipe' (a quantity follows): the class of the item.
+    'sugar das kilo wala' has no other quantity, so it stays 10 kg."""
+    if k < len(toks) and toks[k] == "isi":
+        return True
+    return k < len(toks) and toks[k] in _KG_CLASS_NEXT and any(
+        parse_number_at(toks, n)[0] is not None for n in range(k + 1, min(k + 3, len(toks))))
 
 
 def is_size(tok):
@@ -153,8 +163,8 @@ def glue_sizes(toks):
     split = []
     for t in toks:  # "10carton" -> "10 carton"; "1inch" stays one token, "40m" -> "40mm"
         m = re.fullmatch(r"(\d+(?:\.\d+)?)([a-z]+)", t)
-        if m and m[2] in _MM:
-            split.append(m[1] + "mm")
+        if m and m[2] == "m":  # "90m": a length in metres, one token
+            split.append(t)
         elif m and m[2] in _RATING:
             split.append(m[1] + _RATING[m[2]])
         elif m and m[2] not in _INCH:
@@ -177,11 +187,11 @@ def glue_sizes(toks):
         nxt = toks[j] if j < len(toks) else ""
         if nxt in _INCH:
             unit = "inch"
-        elif nxt in _MM and re.fullmatch(r"\d+", num):
+        elif nxt in _MM and "x" not in num:
             unit = "mm"
         elif nxt in _RATING and "x" not in num:
             unit = _RATING[nxt]
-        elif nxt in _KG and (_after_size(out) or (j + 1 < len(toks) and toks[j + 1] in _KG_CLASS_NEXT)):
+        elif nxt in _KG and (_after_size(out) or _class_next(toks, j + 1)):
             unit = "kg"  # "3 inch 6 kg", "saadhe das kilo ke aath pipe": the pipe's class, not kilos of pipe
         if unit:
             out.append(num + unit)

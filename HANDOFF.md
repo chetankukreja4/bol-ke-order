@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `fix/real-call-pipes`, built on `main` 41e3e84). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `fix/review-pr9`, built on `main` 641a12f). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -61,8 +61,8 @@ Main rules:
 - "nahi, aath carton" changes only that line; "nahi, parso" only the day; "rehne do" changes nothing. "Pakka nahi", "save mat karo", "sahi hai kya" never save.
 - Real calls mix rate talk, conditions and chat. A clause with a quantity is kept even if it says "rate"; a pure rate question is not a line but the item it names is remembered, so "uski bees peti" uses it. "agar ... toh das, nahi toh paanch" becomes one line with two quantities. A generic word with no quantity ("dal rahe ho" is the verb) and a question about something not on the list ("advertisement kitna pada hoga") are talk, not lines.
 - The day said last wins ("aaj order, kal bhejna" = kal); a day followed by "nahi" is dropped. "kal parson" together means "some day soon" and is not a day; "abhi" counts only next to a send word ("abhi bhej do"), not in "abhi yahan rakha hai".
-- Sizes are part of the item name, never a quantity: `textnorm.glue_sizes` turns "1 inch", `3/4"`, `1 1/2''`, "sawa inchi", "chaar by teen", "40mm", "1 hp", and a pipe class after a size ("3 inch 6 kg", "saadhe das kilo ke") into one token ("1inch", "0.75inch", "1.5inch", "1.25inch", "4x3", "40mm", "1hp", "6kg"), the same way for the Busy names and for what staff say. The matcher scores letters and sizes apart, so "elbow 1 inch" is never Elbow 2"; staff may drop the brand on a list full of it ("end cap 1 inch" = Astral End Cap 1''); a model number ends a name ("mini champ 1"). Questions say the size (`Astral Elbow 1"` or `Astral Elbow 2"`).
-- Politeness is not a party ("ji sahab" is not Jain Sahab: the name word itself must be close). A number followed by "rupaye" is a price; fare talk ("kiraya") about nothing on the list is not a line. "bundle" is a unit. In a long call (40+ words), a line with no item, only a vehicle, or a whole sentence that matches nothing is talk; short new names ("pachas motor") stay for "Naya item banao".
+- Sizes are part of the item name, never a quantity: `textnorm.glue_sizes` turns "1 inch", `3/4"`, `1 1/2''`, "sawa inchi", "chaar by teen", "40mm", "1 hp", and a pipe class after a size ("3 inch 6 kg", "saadhe das kilo ke") into one token ("1inch", "0.75inch", "1.5inch", "1.25inch", "4x3", "40mm", "1hp", "6kg"), the same way for the Busy names and for what staff say. The matcher scores letters and sizes apart, so "elbow 1 inch" is never Elbow 2"; staff may drop the brand on a list full of brands ("end cap 1 inch" = Astral End Cap 1''; if another brand has the same item, the app asks which); an answer can be the size ("1 inch wala"); a model number ends a name ("mini champ 1"). Questions say the size (`Astral Elbow 1"` or `Astral Elbow 2"`).
+- Politeness is not a party ("ji sahab" is not Jain Sahab: the name word itself must be close). A number followed by "rupaye" is a price; fare talk ("kiraya") about nothing on the list is not a line. "bundle" is a unit. In a long call recording or pasted call (40+ words; not a spoken or typed order), a line with no item, only a vehicle, or a whole sentence that matches nothing is talk; short new names ("pachas motor") stay for "Naya item banao".
 - Unclear audio → "Awaaz saaf nahi aayi, dobara bolein"; recording kept. 8 s silence → one gentle prompt. Network errors → retry; recording kept. No network at Confirm → the order waits on the phone and is saved later (never dropped; a refused one shows "order atka hai" to fix).
 - Prices and discounts are never changed or stored.
 - Nothing is saved until confirm; the server checks again before saving (names come from the lists, unit known, date real and near, quantity up to 9999) and saves one draft only once.
@@ -95,7 +95,7 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `scripts/get_voice.py` | Downloads the Piper voice into `models/` (git-ignored); the Dockerfile runs it |
 | `static/` | `index.html` (5 tabs), `app.js` (mic engines, voice, pages, teach dialog, offline queue, PIN prompt, imports), `style.css` (Codex look; light + dark). Bump `?v=` on the CSS/JS links when you change them |
 | `.github/workflows/tests.yml` | CI: pytest; then `docker compose up --build` with no keys, `/healthz`, main screen, "key not set", one typed order |
-| `tests/` | 207 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
+| `tests/` | 227 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, `test_review_pr9`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -103,7 +103,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 207 tests (CI runs them, then the compose check, on every push)
+pytest -q                          # 227 tests (CI runs them, then the compose check, on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`. Restart a server started without `--reload` after pulling new code: the page loads new JavaScript at once, but old Python keeps running (this caused "still same" on 27 Nov).
@@ -115,7 +115,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **207 tests pass** locally (CI runs on the PR).
+- **227 tests pass** locally (CI runs on the PR).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
@@ -173,6 +173,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| review fixes (branch `fix/review-pr9`) | From the code review of PR #9: a brand-less name now goes to every item on a branded list, so Astral and Prince Elbow 1" tie and the app asks; "1 inch wala" answers a size question; the long-call talk filter runs only on uploads and pasted calls, so a long spoken order keeps "20 bori" and asks; a quoted number (`lux "10" carton`) is not inches; talk words that are in an item name stay ("Pass Pass", "Bat"); money words drop a line only if it names nothing on the list; "das kilo wala" stays 10 kg (a class only when a quantity follows); "90m" stays metres ("mm" marked before de-doubling); "rs 250" is a price; "bhej do abhi" is today. 227 tests |
 | real calls, pipes (branch `fix/real-call-pipes`) | From a real wholesaler's Busy lists and two call recordings: sizes are part of the name, never a quantity ("10 elbow 1 inch" was 2 lines, "3/4" was 3 and 4); size-aware matching, brand may be dropped, model numbers ("mini champ 1"); questions say the size; "ji sahab" no longer picks Jain Sahab; "rupaye" after a number and fare talk are not lines; "bundle" unit; "kal parson" and "abhi" in talk are not a delivery day; long calls drop item-less and sentence lines; an item said as "nahi hain" is not a line. Also fixed: clauses never split at "aur" (a backspace character was in the regex). 207 tests |
 | docs (branch `docs-update`) | README rewritten for main; HANDOFF sections 1-10 brought up to date (pages, rules, code map, checks, shop-day checklist, demo and deck notes); DEPLOY host notes and checks updated |
 | junk lines (branch `junk-lines`) | From a real pump/motor shop call: a generic word with no quantity ("dal rahe ho" is the verb daalna) and a question about something not on the list ("advertisement kitna pada hoga") no longer become order lines; "bhejun" is filler. Every line has "✕ Hatao" to drop a line the app got wrong (`POST /api/line/remove`, counted as a correction). Real unknown items ("pachas motor", "barah submersible") still become yellow lines |

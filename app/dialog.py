@@ -75,8 +75,8 @@ def _merge_repeats(lines):
     return out
 
 
-def build_draft(transcript: str):
-    data = extract_rules(transcript)
+def build_draft(transcript: str, call: bool = False):
+    data = extract_rules(transcript, call)
     draft = {
         "heard": readable(transcript),
         "party": {"status": data["party"]["status"], "party": data["party"]["party"],

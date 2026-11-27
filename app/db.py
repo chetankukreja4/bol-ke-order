@@ -75,9 +75,13 @@ def _row(r):
 
 
 def _seconds_since(stats, now):
+    """Seconds from the start of the order to its confirm. An order confirmed with
+    no network is saved later; the phone sends how long it waited (offline_seconds)."""
     try:
-        return max(0.0, round((now - datetime.fromisoformat(stats["started_at"])).total_seconds(), 1))
-    except (TypeError, KeyError, ValueError):
+        total = (now - datetime.fromisoformat(stats["started_at"])).total_seconds()
+        waited = min(max(float(stats.get("offline_seconds") or 0), 0.0), max(total, 0.0))
+        return max(0.0, round(total - waited, 1))
+    except (TypeError, KeyError, ValueError, AttributeError):
         return None
 
 

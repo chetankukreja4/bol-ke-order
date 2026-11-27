@@ -4,6 +4,7 @@ import copy
 import csv
 import hashlib
 import hmac
+import time
 import io
 import json
 import os
@@ -30,7 +31,7 @@ def _load_dotenv(path=os.path.join(os.path.dirname(__file__), "..", ".env")):
 
 _load_dotenv()
 
-from fastapi import FastAPI, File, HTTPException, UploadFile  # noqa: E402
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile  # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -52,8 +53,22 @@ app = FastAPI(title="Bol-ke-Order")
 PIN_COOKIE = "bko_pin"
 
 
+LOGIN_TRIES = 5          # wrong PINs allowed per address...
+LOGIN_WINDOW = 10 * 60   # ...in this many seconds; then wait for the window to pass
+_login_fails = {}
+
+
+def reset_login_limits():
+    _login_fails.clear()
+
+
 def _pin_hash(pin):
     return hashlib.sha256(f"bko:{pin}".encode()).hexdigest()
+
+
+def _same(a, b):
+    """Constant-time compare that never raises on non-ASCII text."""
+    return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 
 @app.middleware("http")
@@ -63,7 +78,7 @@ async def shop_pin(request, call_next):
     pin = os.getenv("BKO_PIN", "").strip()
     path = request.url.path
     if pin and path.startswith("/api/") and path != "/api/login":
-        if not hmac.compare_digest(request.cookies.get(PIN_COOKIE, ""), _pin_hash(pin)):
+        if not _same(request.cookies.get(PIN_COOKIE, ""), _pin_hash(pin)):
             return JSONResponse({"detail": "PIN chahiye", "error": "pin"}, status_code=401)
     return await call_next(request)
 
@@ -73,9 +88,16 @@ class PinIn(BaseModel):
 
 
 @app.post("/api/login")
-def login(body: PinIn):
+def login(body: PinIn, request: Request):
     pin = os.getenv("BKO_PIN", "").strip()
-    if pin and not hmac.compare_digest(body.pin.strip(), pin):
+    who = request.client.host if request.client else "?"
+    now = time.monotonic()
+    recent = [t for t in _login_fails.get(who, []) if now - t < LOGIN_WINDOW]
+    _login_fails[who] = recent
+    if pin and len(recent) >= LOGIN_TRIES:
+        raise HTTPException(429, "Bahut galat PIN. 10 minute baad try karein")
+    if pin and not _same(body.pin.strip(), pin):
+        recent.append(now)
         raise HTTPException(401, "PIN galat hai")
     resp = JSONResponse({"ok": True})
     if pin:
@@ -488,6 +510,8 @@ def dispatch_parse(body: DispatchTextIn):
             o = db.get_order(n)
             if not o:
                 return {"ok": False, "say": f"Order {n} nahi mila. Dobara bolein."}
+            if o["status"] == "cancelled":
+                return {"ok": False, "say": f"Order {o['id']} cancel ho chuka hai."}
             if o["status"] != "confirmed":
                 return {"ok": False, "say": f"Order {o['id']} pehle hi {o['dispatch_mode'] or ''} se ja chuka hai."}
             if p["status"] == "ok" and p["party"]["code"] != o["party_code"]:
@@ -531,6 +555,8 @@ def dispatch(order_id: int, body: DispatchIn):
         raise HTTPException(404, "Order not found")
     if body.mode not in catalog.DISPATCH_MODES:
         raise HTTPException(400, "Mode must be one of: " + ", ".join(catalog.DISPATCH_MODES))
+    if o["status"] == "cancelled":
+        raise HTTPException(409, f"Order {order_id} cancel ho chuka hai")
     if o["status"] != "confirmed":
         raise HTTPException(409, f"Order {order_id} pehle hi {o['dispatch_mode'] or ''} se ja chuka hai")
     return db.mark_dispatched(order_id, body.mode)

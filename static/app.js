@@ -428,6 +428,7 @@ async function saveOrder() {
   $('cfConfirm').disabled = true;
   try {
     state.order = await post('/api/orders', { draft: state.draft });
+    if (state.draft?.draft_id) writeQueue(readQueue().filter((x) => x.draft.draft_id !== state.draft.draft_id));
     state.startedAt = null; // the next order starts its own clock
     renderDone();
     speak(`Order ${state.order.id} save ho gaya.`);
@@ -504,26 +505,44 @@ const QUEUE_KEY = 'bko-queue';
 const readQueue = () => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (_) { return []; } };
 const writeQueue = (q) => { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (_) {} renderQueuePill(); };
 function renderQueuePill() {
-  const n = readQueue().length;
+  const q = readQueue();
+  const stuck = q.filter((x) => x.error);
   let p = document.querySelector('#pills [data-queue]');
-  if (!n) { p?.remove(); return; }
-  if (!p) { p = document.createElement('span'); p.className = 'pill queue'; p.dataset.queue = '1'; $('pills').appendChild(p); }
-  p.textContent = `${n} order ruka hai`;
+  if (!q.length) { p?.remove(); return; }
+  if (!p) {
+    p = document.createElement('button'); p.type = 'button'; p.className = 'pill queue'; p.dataset.queue = '1';
+    p.onclick = openStuck; $('pills').appendChild(p);
+  }
+  p.textContent = stuck.length ? `${stuck.length} order atka hai · kholein` : `${q.length} order ruka hai`;
+  p.title = stuck.length ? stuck[0].error : 'Network aate hi save hoga';
+}
+// An order the server refused after waiting offline (say its date has passed) is never
+// thrown away: it opens in "Check the order" to fix and confirm again.
+function openStuck() {
+  const item = readQueue().find((x) => x.error);
+  if (!item) return toast('Network aate hi save hoga');
+  state.draft = item.draft;
+  state.startedAt = null;
+  renderConfirm(false);
+  toast(`Save nahi hua: ${item.error}. Theek karke Confirm karein.`, 6000);
 }
 let flushing = false;
 async function flushQueue() {
   if (flushing || !navigator.onLine) return;
   flushing = true;
   try {
-    for (const item of readQueue()) {
+    for (const item of readQueue().filter((x) => !x.error)) {
       try {
-        const o = await api('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: item.draft }) }, 1);
+        // the time it waited for the network is not time spent taking the order
+        const draft = { ...item.draft, stats: item.draft.stats ? { ...item.draft.stats, offline_seconds: (Date.now() - item.at) / 1000 } : item.draft.stats };
+        const o = await api('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft }) }, 1);
         writeQueue(readQueue().filter((x) => x.draft.draft_id !== item.draft.draft_id));
         toast(`Ruka hua order #${o.id} save ho gaya`);
       } catch (e) {
         if (e.network) break; // still offline: try later
-        writeQueue(readQueue().filter((x) => x.draft.draft_id !== item.draft.draft_id));
-        toast(`Ruka hua order save nahi hua: ${e.message}`, 5000);
+        // keep it, marked, so it can be opened and fixed (never lost)
+        writeQueue(readQueue().map((x) => (x.draft.draft_id === item.draft.draft_id ? { ...x, error: e.message } : x)));
+        toast(`Ruka hua order save nahi hua: ${e.message}. Upar "order atka hai" dabayein.`, 6000);
       }
     }
   } finally { flushing = false; }

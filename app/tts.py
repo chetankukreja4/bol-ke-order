@@ -55,10 +55,33 @@ def clean(text: str) -> str:
     return text[:MAX_CHARS]
 
 
+def _names():
+    """Item and party names as the app says them (full, and without size words
+    like '1L'), longest first, so "Main Road Stores" is never turned into Hindi."""
+    from .catalog import CATALOG, PARTIES
+    out = set()
+    for n in [i["name"] for i in CATALOG] + [p["name"] for p in PARTIES]:
+        out.add(n)
+        short = " ".join(w for w in n.split() if not any(ch.isdigit() for ch in w))
+        if short:
+            out.add(short)
+    return sorted(out, key=len, reverse=True)
+
+
 def to_speech_text(text: str) -> str:
     """'Sahi hai? Haan pakka bolein.' -> 'सही है? हाँ पक्का बोलें।'"""
     text = clean(text)
+    kept = []
+
+    def hold(m):
+        kept.append(m.group(0))
+        return f"\x00{len(kept) - 1}\x00"
+
+    names = [n for n in _names() if any(w.lower() in HINGLISH for w in _WORD.findall(n))]
+    if names:
+        text = re.sub(r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b", hold, text, flags=re.I)
     text = _WORD.sub(lambda m: HINGLISH.get(m.group(0).lower(), m.group(0)), text)
+    text = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
     return re.sub(r"(?<!\d)\.(?!\d)", "।", text)  # a full stop, not a decimal point
 
 

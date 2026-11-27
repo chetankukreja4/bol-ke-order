@@ -219,6 +219,10 @@ def answer(d, text: str):
             return d, "confirm"
         d["say"] = f"Pehle ye batayein: {d['question']['text']}"
         return d, "repeat"
+    if is_correction(text) and parse_date(text) and not quantities_in(" ".join(norm(text).split()[1:])):
+        d["delivery"] = parse_date(text)  # "nahi, parso": only the day changes
+        _count(d, "corrections")
+        return finish(d), "updated"
     if is_correction(text):
         d, ok = _apply_correction(d, text)
         if ok:
@@ -277,7 +281,8 @@ def answer(d, text: str):
         if extra["lines"]:
             d["lines"].extend(make_line(r) for r in extra["lines"])
             handled = True
-        if extra["delivery"] and not d["delivery"]:
+        past = bool(d["delivery"]) and str(d["delivery"].get("date", "")) < today().isoformat()
+        if extra["delivery"] and (not d["delivery"] or past):  # a passed date (order waited offline) can be said again
             d["delivery"], handled = extra["delivery"], True
     if handled:
         _count(d, "questions")  # every answer that changed the order
@@ -340,6 +345,9 @@ def validate_for_save(d):
         when = date.fromisoformat(str(d["delivery"].get("date")))
     except (TypeError, ValueError):
         return "Delivery date not valid"
-    if not -1 <= (when - today()).days <= 60:
-        return "Delivery date too far"
+    days = (when - today()).days
+    if days > 60:
+        return "Delivery date bahut aage hai (60 din tak)"
+    if days < -1 and d.get("edit_of") is None:  # a late order being edited keeps its date
+        return "Delivery date pichhli hai. Nayi date bolein (aaj, kal, parso)"
     return None

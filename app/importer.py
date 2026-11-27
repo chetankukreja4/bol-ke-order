@@ -187,8 +187,14 @@ BUSY_HEADINGS = {"sundry debtors", "sundry creditors", "bank accounts", "bank od
 
 
 def _customer_group(group):
+    """'Sundry Debtors' and shop-made sub-groups ('Wholesale Parties') are customers;
+    Busy's bank / expense / tax / supplier groups are not. Whole words only, so
+    'wholesale' is not 'sale'."""
     g = _key(group)
-    return not g or "debtor" in g or not any(w in g for w in NOT_CUSTOMER)
+    if not g or "debtor" in g:
+        return True
+    words = re.findall(r"[a-z]+", g)
+    return not any(w.startswith(stem) for w in words for stem in NOT_CUSTOMER)
 
 
 def to_parties(rows, existing=()):
@@ -198,12 +204,15 @@ def to_parties(rows, existing=()):
     old = _old_codes(existing)
     used = set(old.values())
     heading = ""  # a "grouped" Busy export puts the group name on its own row above its accounts
+    has_group = any(_pick(r, PARTY_COLS["group"]) for r in rows)
+    multi = any(sum(1 for v in r.values() if v) > 1 for r in rows)  # accounts carry a balance etc.
     for n, row in enumerate(rows, 1):
         name = _pick(row, PARTY_COLS["name"])
         if not name or len(name) > 80:
             skipped.append({"row": n, "name": name, "reason": "naam nahi"})
             continue
-        if _key(name) in BUSY_HEADINGS or "sundry" in _key(name):
+        name_only = sum(1 for v in row.values() if v) == 1
+        if _key(name) in BUSY_HEADINGS or "sundry" in _key(name) or (multi and not has_group and name_only):
             heading = name
             skipped.append({"row": n, "name": name, "reason": "group heading"})
             continue

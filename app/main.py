@@ -277,6 +277,22 @@ async def items_import(file: UploadFile = File(...), commit: int = 0):
     return _import_reply(rows, items, skipped, done)
 
 
+XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@app.get("/api/items/template.xlsx")
+def items_template():
+    """Empty Excel sheet for shops that do not use Busy."""
+    return Response(importer.template("items", list(UNITS)), media_type=XLSX_TYPE,
+                    headers={"Content-Disposition": 'attachment; filename="bol-ke-order-items.xlsx"'})
+
+
+@app.get("/api/parties/template.xlsx")
+def parties_template():
+    return Response(importer.template("parties"), media_type=XLSX_TYPE,
+                    headers={"Content-Disposition": 'attachment; filename="bol-ke-order-parties.xlsx"'})
+
+
 @app.get("/api/parties")
 def parties_list():
     return db.list_parties()

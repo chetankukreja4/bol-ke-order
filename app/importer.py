@@ -27,7 +27,7 @@ ITEM_COLS = {
 PARTY_COLS = {
     "name": ["name", "account name", "party name", "particulars"],
     "group": ["group", "parent group", "under"],
-    "aliases": ["aliases", "alias", "print name"],
+    "aliases": ["aliases", "spoken names", "alias", "print name"],
 }
 CODE_RE =re.compile(r"[A-Z0-9_-]{1,12}")
 
@@ -63,8 +63,13 @@ def _grid(filename, data):
         try:
             wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         except Exception as e:  # corrupt file, password, not really xlsx
-            raise ImportProblem("Ye Excel file khul nahi rahi. Busy se dobara .xlsx ya CSV export karein.") from e
-        rows = itertools.islice(wb.active.iter_rows(values_only=True), HEADER_SCAN + MAX_ROWS + 1)
+            raise ImportProblem("Ye Excel file khul nahi rahi. Ise .xlsx ya CSV mein dobara save karein.") from e
+        # the sheet with a "Name" header, not just the one that was open when saved
+        heads = set(ITEM_COLS["name"]) | set(PARTY_COLS["name"])
+        sheet = next((ws for ws in wb.worksheets
+                      if any(_key(c) in heads for row in ws.iter_rows(max_row=HEADER_SCAN, values_only=True) for c in row)),
+                     wb.active)
+        rows = itertools.islice(sheet.iter_rows(values_only=True), HEADER_SCAN + MAX_ROWS + 1)
         return [[_cell(c) for c in row] for row in rows]
     raise ImportProblem("Excel ko .xlsx ya CSV mein save karein")
 
@@ -195,6 +200,52 @@ def _customer_group(group):
         return True
     words = re.findall(r"[a-z]+", g)
     return not any(w.startswith(stem) for w in words for stem in NOT_CUSTOMER)
+
+
+TEMPLATE_HEADERS = {
+    "items": ["Name", "Unit", "Spoken names", "Code"],
+    "parties": ["Name", "Spoken names"],
+}
+TEMPLATE_HELP = {
+    "items": [
+        "Kaise bharein (pehli sheet mein, ek line = ek item)",
+        "Name: item ka poora naam, jaise 'PVC Pipe 1 inch 6kg' ya 'Elbow 1 inch Heavy'. Zaroori.",
+        "Unit: {units}. Khaali chhodein to 'piece'.",
+        "Spoken names: staff phone par jo bolte hain, comma se alag, jaise 'inchy heavy, heavy elbow'.",
+        "Code: optional. Khaali chhodein to app khud banayega (I001, I002...).",
+        "Rate ya price mat bharein: app prices save nahi karta.",
+        "Bhar kar Items tab mein 'Busy / Excel se items laayein' se file chunein, preview dekh kar Haan dabayein.",
+    ],
+    "parties": [
+        "Kaise bharein (pehli sheet mein, ek line = ek party / customer)",
+        "Name: dukaan ya party ka naam, jaise 'Shree Ganesh Hardware'. Zaroori.",
+        "Spoken names: staff jo bolte hain, comma se alag, jaise 'ganesh wale, ganesh bhai'.",
+        "Bhar kar Items tab mein 'Busy / Excel se parties laayein' se file chunein.",
+    ],
+}
+
+
+def template(kind, units=()):
+    """An empty .xlsx to fill by hand: header row only (no example rows that
+    could be imported by mistake) and a second sheet that says how to fill it."""
+    import openpyxl
+    from openpyxl.styles import Font
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Items" if kind == "items" else "Parties"
+    ws.append(TEMPLATE_HEADERS[kind])
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for col, width in zip("ABCD", (36, 12, 44, 12)):
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = "A2"
+    help_ws = wb.create_sheet("Kaise bharein")
+    for line in TEMPLATE_HELP[kind]:
+        help_ws.append([line.format(units=", ".join(units))])
+    help_ws.column_dimensions["A"].width = 110
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def to_parties(rows, existing=()):

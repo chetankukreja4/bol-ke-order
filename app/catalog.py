@@ -101,7 +101,9 @@ UNITS = {
     "packet": ["packet", "pkt", "paket", "packets", "pack"],
     "piece": ["piece", "pc", "pcs", "nag", "pieces"],
     "kg": ["kg", "kilo", "kilogram", "kgs"],
-    "litre": ["litre", "liter", "ltr"],
+    "litre": ["litre", "liter", "ltr", "ltrs", "litres"],
+    "dozen": ["dozen", "darjan", "dajan", "dazan", "dz", "dzn", "doz"],
+    "gram": ["gram", "grams", "gm", "gms"],
 }
 
 DISPATCH_MODES = {

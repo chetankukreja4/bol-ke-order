@@ -12,7 +12,7 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 | Health check | `GET /healthz` returns `{"ok": true}` |
 | HTTPS | Required for the live microphone in the browser. Turn on the host's free HTTPS / SSL. |
 | Disk | Mount a persistent volume at `/data` (orders live in `/data/orders.db`). Without it, orders reset on every redeploy. 1 GB is plenty. |
-| Memory | 512 MB is enough. |
+| Memory | 512 MB should be enough; the voice model (64 MB file) is loaded on the first spoken line. Not measured in Docker yet. |
 | Env vars | All optional. See below. |
 
 ### Environment variables
@@ -22,6 +22,8 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 | `SARVAM_API_KEY` | Optional | Speech-to-text (Sarvam `saaras:v4`) for the live mic and uploaded recordings. Without it, the live mic uses the browser's speech recognition and uploads show "Speech key not set". |
 | `PORT` | Set by most hosts | Port to listen on. Default `8000`. |
 | `DB_PATH` | Optional | Default `/data/orders.db`. |
+| `BKO_VOICE_MODEL` | Set by the Dockerfile | Path of the local Hindi voice (Piper). The Docker build downloads it (~64 MB) with `scripts/get_voice.py`. Without it the browser's own voice is used. |
+| `BKO_PIN` | Recommended on a public URL | A shop PIN. When set, the app asks for it once on each phone. Without it anyone with the link can see orders. |
 
 Put keys in the host's "secrets" or "environment" screen. Never put them in the repo.
 

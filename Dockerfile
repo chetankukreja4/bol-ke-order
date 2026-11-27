@@ -11,12 +11,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY tests ./tests
+COPY scripts ./scripts
+
+# Local Hindi voice for the spoken read-back (Piper hi_IN pratham, ~64 MB). No key, no per-order cost.
+RUN python scripts/get_voice.py /app/models
 
 # Run as a normal user; orders are stored in /data (mount a volume there)
 RUN useradd --create-home appuser && mkdir -p /data && chown -R appuser /data /app
 USER appuser
 
 ENV DB_PATH=/data/orders.db \
+    BKO_VOICE_MODEL=/app/models/hi_IN-pratham-medium.onnx \
     PORT=8000 \
     PYTHONUNBUFFERED=1
 VOLUME /data

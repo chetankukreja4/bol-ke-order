@@ -391,3 +391,7 @@ h2.saved { margin: 0 0 6px; font-size: clamp(30px, 4.5vw, 44px); color: var(--in
 @media (max-width: 720px) { .head-actions { max-width: 50%; } .head-actions .btn { font-size: 12px; min-height: 40px; padding: 6px 10px; } }
 .seg button { white-space: nowrap; }
 @media (max-width: 720px) { .seg { gap: 3px; padding: 4px; } .seg button { font-size: 12px; padding: 0 4px; min-height: 38px; } }
+.teach { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.teach .btn { background: var(--card); }
+.teach-list { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
+.teach-list .row-card { padding: 10px 4px; }

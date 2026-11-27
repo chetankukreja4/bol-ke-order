@@ -317,6 +317,22 @@ def draft_from_order(o):
     return finish(d)
 
 
+def link_line(d, line_id, code):
+    """Staff tapped "Kisi item se jodo" (or made a new item) for this line.
+    Only a person links a line; the app never does it on its own."""
+    line = _line(d, line_id)
+    if line is None:
+        raise KeyError("line")
+    if code not in ITEMS_BY_CODE:
+        raise KeyError("code")
+    line["item"], line["match"], line["options"], line["group"] = item_option(code), "ok", [], ITEMS_BY_CODE[code].get("group")
+    line["unit"] = line["unit"] if line.get("heard_unit") and line.get("unit") else ITEMS_BY_CODE[code]["unit"]
+    _refresh_line(line)
+    d["last_line_id"] = line["id"]
+    _count(d, "questions")
+    return finish(d)
+
+
 def validate_for_save(d):
     """Server-side check before saving. Returns error text or None.
     The browser holds the draft, so nothing in it is trusted: codes must be on

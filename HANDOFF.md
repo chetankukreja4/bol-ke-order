@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `junk-lines`, built on `main` 9f3c671). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `docs-update`, built on `main` 2cdbba7). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -13,27 +13,30 @@ A voice-first prototype for **Build for Bharat (Scaler × Flow), Round 2**: "bui
 
 Problem (from Round 1): in Indian wholesale shops, phone orders are written on a parchi and typed again into billing software (Busy). It is slow, and wrong items or quantities cause returns and a second dispatch. One wholesaler we interviewed gets about 20 phone orders a day and has agreed to test the prototype.
 
-What it does: staff speak the order in Hinglish, upload the customer's call recording / WhatsApp voice note, or paste a call transcript (from the phone's own call transcript, e.g. Samsung, or any AI app). The app shows what it heard next to what it understood, reads the order back, asks one question at a time about anything unclear, and saves only after "haan, pakka". It then prints a parchi and gives a CSV for Busy. Dispatch is also recorded by voice.
+What it does: staff speak the order in Hinglish, upload the customer's call recording / WhatsApp voice note, or paste a call transcript (from the phone's own call transcript, e.g. Samsung, or any AI app). The app shows what it heard next to what it understood, reads the order back in a local Hindi voice, asks one question at a time about anything unclear, and saves only after "haan, pakka". It then prints a parchi, shares it on WhatsApp and gives a CSV for Busy. Dispatch is also recorded by voice. The shop's own items and parties come from a Busy export or a filled Excel template, and staff teach the app their words from the order screen. A Pilot tab measures time, questions and corrections for the deck.
 
 ## 2. Where things are
 
 | What | Where |
 |---|---|
 | Code | https://github.com/chetankukreja4/bol-ke-order (public, branch `main`) |
+| CI | GitHub Actions `tests` workflow: pytest, then `docker compose up --build` with no keys and a check of the main screen |
 | Local copy | `E:\scaler\bol-ke-order` |
-| Live URL | Not deployed yet. Plan: Dostack Cloud (see `DEPLOY.md`). |
+| Live URL | Not deployed yet. Host not chosen: `render.yaml` is ready; dostack.ai looked like an AI app builder rather than a Docker host (from its home page only, not confirmed). The rules say "You host it yourself". |
 | Round 1 research | `E:\scaler\Bharat_Ka_Hisaab_Research` |
 
 ## 3. Hackathon submission (deadline 30 Nov 2026, 11:59 pm, one submission per team)
 
 | Item | Status |
 |---|---|
-| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 2,750 lines of app code + 300 lines of tests. Starts with no keys; a missing key shows a "key not set" label. |
-| 2. YouTube demo, 3 minutes or less | **To do.** Script idea in section 9. |
-| 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. |
-| 4. Live link (optional bonus) | **To do.** Deploy on Dostack Cloud. |
+| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 4,800 lines of app code + 1,400 lines of tests. Starts with no keys; a missing key shows "key not set". CI checks this on every push. |
+| 2. YouTube demo, 3 minutes or less | **To do.** Plan in section 9. Record it from the real shop test. |
+| 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. Use the Pilot tab numbers. |
+| 4. Live link (optional bonus) | **To do.** Also needed for the phone mic (HTTPS). See `DEPLOY.md`. |
 
-The Docker image is built and started with no keys on every push and PR by GitHub Actions (`tests` workflow), and `/healthz` answers (all three PRs green on 27 Nov). A friend running `docker compose up --build` on their own machine is still a good last check (the organisers' tip).
+Plan agreed on 27 Nov: feature freeze; only fix what the real shop test shows. Day 1 deploy + import the shop's lists + practice run; day 2 real orders in the shop (record the video, download the Pilot CSV); day 3 fixes, deck, video; submit on the 30th well before 11:59 pm.
+
+A friend running `docker compose up --build` on their own machine is still a good last check (the organisers' tip).
 
 ## 4. How it works
 
@@ -49,45 +52,48 @@ Pasted call transcript → app/transcript.py clean-up ───┤
    plain code: Devanagari → Roman, spoken numbers → numbers, fuzzy item
    and party match, dates, one question at a time, corrections, checks
                                                        ▼
-      read-back (voice + screen) → "haan, pakka" → SQLite → parchi + CSV
+   read-back (local Piper voice + screen) → "haan, pakka" → SQLite → parchi + CSV
 ```
 
-Main rules (from the spec):
-- No LLM. All extraction, matching and number work is normal code (removed Claude on 27 Nov to keep one paid dependency).
-- Never guesses: "sabun" asks the brand; weak matches show top 3; "10 ya 12" asks; "Sharma ji" asks which Sharma. Uncertain lines are yellow with "Pakka nahi hoon."
-- "nahi, aath carton" changes only that line.
-- Real calls mix rate talk and conditions. A clause with a quantity is kept even if it says "rate"; a pure rate question is not a line but the item it names is remembered, so "uski bees peti" / "usmein ... das peti" use it (only when such a pointer word or "agar" is said; otherwise a missing item is asked, never filled in). "agar ... toh das, nahi toh paanch" becomes one line with two quantities, so the app asks "10 ya 5?". The condition is shown on the line ("❓ Shart: agar sasta rate ...") for staff to settle with the party.
-- Unclear audio → "Awaaz saaf nahi aayi, dobara bolein"; recording kept. 8 s silence → one gentle prompt. Network errors → retry; recording kept.
+Main rules:
+- No LLM. All extraction, matching and number work is normal code (Claude was removed on 27 Nov to keep one paid dependency).
+- Never guesses: "sabun" asks the brand; weak matches show top 3; "10 ya 12" / "10 se 12" ask; "Sharma ji" asks which Sharma; two parties in one call ask which; a party with two open orders asks which in dispatch. Uncertain lines are yellow with "Pakka nahi hoon." Only staff link a line to an item.
+- "nahi, aath carton" changes only that line; "nahi, parso" only the day; "rehne do" changes nothing. "Pakka nahi", "save mat karo", "sahi hai kya" never save.
+- Real calls mix rate talk, conditions and chat. A clause with a quantity is kept even if it says "rate"; a pure rate question is not a line but the item it names is remembered, so "uski bees peti" uses it. "agar ... toh das, nahi toh paanch" becomes one line with two quantities. A generic word with no quantity ("dal rahe ho" is the verb) and a question about something not on the list ("advertisement kitna pada hoga") are talk, not lines.
+- The day said last wins ("aaj order, kal bhejna" = kal); a day followed by "nahi" is dropped.
+- Unclear audio → "Awaaz saaf nahi aayi, dobara bolein"; recording kept. 8 s silence → one gentle prompt. Network errors → retry; recording kept. No network at Confirm → the order waits on the phone and is saved later (never dropped; a refused one shows "order atka hai" to fix).
 - Prices and discounts are never changed or stored.
-- Consent note on the upload screen.
-- Nothing is saved until confirm; the server checks again before saving.
-- The parchi never prints what the app heard; that text is shown on screen only, below the parchi.
+- Nothing is saved until confirm; the server checks again before saving (names come from the lists, unit known, date real and near, quantity up to 9999) and saves one draft only once.
+- The parchi never prints what the app heard; that text is shown on screen only.
 
-Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
-- **Order**: hold-to-speak mic, upload recording, paste call transcript, type, sample phrases; then Heard text → Check the order → Parchi.
-- **Orders**: all orders with All / Pending / Dispatched filter; tap one to see and print its parchi.
-- **Dispatch**: "Dispatch bolo" mic plus a "Waiting to go" list with one-tap mode buttons. The talk keeps context between turns (the browser sends back `order_ids` and `mode`), so "truck se" and "हां पक्का" continue it. Orders can be named by party ("ABC ka maal gaya") or number ("order 6", "6 number wala", "order 3, 4 aur 5 ek hi truck"). If speech joins numbers ("345") and no such order exists, it is split into open orders only when exactly one split fits (and matches "teeno"/"dono" if said). Everything is read back for "pakka".
-- **Items**: list, search, add, edit, remove items (code, name, unit, group, spoken names). Saved in SQLite; matching and Sarvam keyterms update at once.
+Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
+- **Order**: hold-to-speak mic, upload recording, paste call transcript, type, sample phrases, "Practice order" tick; then Heard text → Check the order → Parchi. Yellow lines have **Kisi item se jodo** (link + learn the heard words), **Naya item banao**; every line has **Hatao**. After saving: print, CSV, WhatsApp, Edit, Cancel, Galat nikla (with Undo).
+- **Orders**: All / Aaj jaana / Pending / Dispatched; tap one to see its parchi; "Aaj ki Busy CSV" and a review sheet.
+- **Dispatch**: "Dispatch bolo" mic plus a "Waiting to go" list whose mode buttons ask "Pakka?" first. The talk keeps context between turns, so "truck se" and "हां पक्का" continue it. Orders can be named by party or number ("order 6", "order 3, 4 aur 5 ek hi truck"); joined numbers ("345") are split only when exactly one split fits. Cancelled orders say "cancel ho chuka hai".
+- **Items**: items and parties; Busy / Excel import with preview; blank Excel templates; add, edit, remove, search. A spoken name used by another item is refused.
+- **Pilot**: orders, time to confirm, questions, corrections, % right after saving, stopwatch baseline, CSV; Demo reset only with `BKO_DEMO=1`.
 
 ## 5. Code map
 
 | File | What it does |
 |---|---|
-| `app/main.py` | FastAPI routes: `/api/config`, `/api/transcribe`, `/api/parse`, `/api/answer`, `/api/orders` (+ CSV), `/api/dispatch/*`, `/api/items` (list, add, edit, remove), `/healthz`, and the static page |
+| `app/main.py` | FastAPI routes: `/api/config`, `/api/login` (PIN), `/api/transcribe`, `/api/parse`, `/api/answer`, `/api/teach`, `/api/line/remove`, `/api/orders` (save, list, `/draft` for edit, `/cancel`, `/wrong`, `/dispatch`, CSVs incl. `?day=today`), `/api/dispatch/parse`, `/api/items` and `/api/parties` (list, add, edit, remove, `/import`, `/template.xlsx`), `/api/pilot` (+ CSV, baseline), `/api/demo/reset`, `/api/speak`, `/healthz`, the static page, and the optional PIN middleware |
 | `app/textnorm.py` | Devanagari → Roman, spelling clean-up, spoken numbers (das, dus, ten, pachees, do sau, दस) |
-| `app/catalog.py` | 20 sample items (seed for the Items page) with Hinglish aliases, 7 parties, units, dispatch modes. `replace_items()` swaps the live item list |
-| `app/matcher.py` | RapidFuzz item and party matching, brand groups, picking an option from an answer |
-| `app/parser.py` | Rule-based extraction (no key needed), dates, confirm/correction/cancel words, dispatch parsing: party, mode, order numbers (`find_order_numbers`), splitting joined numbers (`split_joined_number`) |
-| `app/dialog.py` | Draft order, read-back text, next question, applying answers and corrections, save checks |
-| `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit` mode = Roman Hinglish, shop keyterms) for the live mic and uploads, ffmpeg chunking, retries, falls back to plain settings on HTTP 400 |
-| `app/transcript.py` | Cleans a pasted call transcript (Samsung call transcript, other phones, AI apps): removes times, speaker labels, phone numbers; keeps contact names. Repeated lines ("10 carton Lux, theek hai") are merged in `dialog.py` |
-| `app/pilot.py` | Pilot numbers: `new_stats()` starts the stats that ride in the draft (source, questions, corrections, test order); `summary()` and `csv_rows()` for `/api/pilot` and `/api/pilot.csv` (practice orders left out) |
-| `app/importer.py` | Reads a Busy export (CSV or .xlsx; title rows above the header are skipped) into the item list: Busy columns Name/Alias/Group/Main Unit or simple code,name,unit,group,aliases. Units map to the app's units (unknown = piece). `.xls` is refused with a message. Also the party list (`to_parties`): ledgers under bank/expense/creditor/tax groups are skipped, Sundry Debtors and its sub-groups kept. Spoken names need letters and 3+ characters (a Busy alias like "10" is dropped). A unique first word ("Gupta") becomes a spoken name unless it is close to another party's ("Shiv"/"Shiva"). Re-import keeps the code of a party or item with the same name |
-| `app/db.py` | SQLite `orders`, `items` and `parties` tables (items and parties seeded from the samples once); orders also keep `stats`, `seconds_to_confirm`, `wrong_reason` |
+| `app/catalog.py` | 20 sample items and 7 sample parties (seeds), units (incl. dozen, gram), dispatch modes, live lists with `replace_items()` / `replace_parties()`, which-party words worked out from the list |
+| `app/matcher.py` | RapidFuzz item and party matching, brand groups, lead checks, picking an option from an answer |
+| `app/parser.py` | Rule-based extraction, dates, confirm / correction / leave-it words, two-party detection, talk filters, dispatch parsing (party, mode, order numbers, joined numbers) |
+| `app/dialog.py` | Draft order, read-back, next question, answers and corrections, `link_line` (teach), `remove_line`, `draft_from_order` (edit), save checks |
+| `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit`, keyterms: parties then most-ordered items), ffmpeg chunking off the main thread, retries |
+| `app/tts.py` | Local Piper Hindi voice (`hi_IN-pratham-medium`): Hinglish words → Devanagari (names stay English), mp3 via ffmpeg, cache |
+| `app/transcript.py` | Cleans a pasted call transcript: removes times, speaker labels, phone numbers |
+| `app/importer.py` | Busy / Excel / CSV import for items and parties (header found under title rows; whole-word customer groups; grouped exports; stable codes; spoken names need 3+ letters) and the blank Excel templates |
+| `app/pilot.py` | Pilot stats in the draft (start time, source, questions, corrections, test order, offline wait), `summary()`, `csv_rows()` |
+| `app/db.py` | SQLite `orders`, `items`, `parties`, `meta`; one order per draft id; edit, cancel, wrong / undo, orders of a day, most-ordered items, demo reset |
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
-| `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (look taken from the Codex prototype `bol-ke-order-scaler-round-2`: green ink, lime accent, white cards, pill page nav at the top; light + dark). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
-| `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
-| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py`, `tests/test_tts.py`, `tests/test_improvements.py`, `tests/test_review_fixes.py` | Busy imports, which-party questions, pilot numbers, one test per bug from the 27 Nov full check, the local voice, edit/cancel and the other improvements, and the code-review fixes. 163 tests in all (plus `tests/test_teach.py`, `tests/test_template.py`, `tests/test_junk_lines.py`) |
+| `scripts/get_voice.py` | Downloads the Piper voice into `models/` (git-ignored); the Dockerfile runs it |
+| `static/` | `index.html` (5 tabs), `app.js` (mic engines, voice, pages, teach dialog, offline queue, PIN prompt, imports), `style.css` (Codex look; light + dark). Bump `?v=` on the CSS/JS links when you change them |
+| `.github/workflows/tests.yml` | CI: pytest; then `docker compose up --build` with no keys, `/healthz`, main screen, "key not set", one typed order |
+| `tests/` | 163 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`). They never read `.env` (`BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -95,67 +101,64 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 163 tests (inside .venv or the container; CI runs them on every push)
+pytest -q                          # 163 tests (CI runs them, then the compose check, on every push)
 ```
 
-Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
+Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`. Restart a server started without `--reload` after pulling new code: the page loads new JavaScript at once, but old Python keeps running (this caused "still same" on 27 Nov).
 
-Key (optional, never commit it): `SARVAM_API_KEY` in `.env` (not `.env.example`, which is public). See `.env.example`.
+Key (optional, never commit it): `SARVAM_API_KEY` in `.env` (not `.env.example`, which is public).
 
-Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at `/data`, health check `/healthz`.
+Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at `/data`, health check `/healthz`, and `BKO_PIN`.
 
 ## 7. What is checked and what is not
 
 Checked:
-- **Docker** (GitHub Actions on every push: `docker compose up --build` with no keys, then the health check, the main screen and one typed order; first green on PRs #1, #2, #3 on 27 Nov): the image builds (on `codex-look` and `improvements` it also downloads the voice model), starts with no keys, and `/healthz` answers. Docker is still not installed on the dev PC. Memory use on a 512 MB host is not measured.
-- 145 tests pass (on `improvements`: 9+1 review-fix and 8 improvement tests, 11 voice tests, 44 bug tests on `codex-look`, 28 on `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
-- Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
-- In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
-- The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
-- ffmpeg chunking: a 70 s file becomes 3 chunks.
-- The server start command and health check work.
+- **163 tests pass** locally and in CI.
+- **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
+- **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
+- **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
+- **Browser** (scratch database, phone and desktop, light and dark): every tab, order flow to parchi, edit, cancel, Galat nikla + Undo, WhatsApp link text, Aaj jaana, Busy CSV, offline queue (blocked network, queued, saved once; a passed date shown as "atka hai" and fixed by voice), demo reset, Busy-style imports, Excel template download, teach (Jodo / Naya item, learned for the next order), Hatao.
+- **Owner's real calls**: rate talk / "uski" / agar-nahi toh (fixed), and a pump/motor shop call where talk became lines (fixed; verified on the restarted server).
 
 Not checked yet:
-- **A real Busy export**: the importer was tested with Busy-style files we made (title rows, Name/Alias/Group/Main Unit, Sundry Debtors). Import the shop's real file once and look at the preview before saying yes.
-- **Phone microphone over HTTPS**: needs a deploy. The header pill "Mic: Sarvam AI ⇄" switches between Sarvam and the browser recogniser; the browser one writes Devanagari and mishears numbers and "truck" more often.
-- **A real Samsung call transcript**: the four formats tested were written by us. Paste one real copy to check.
-- **Upload of a real call recording** through Sarvam.
-- Real shop noise and accents.
+- **Deploy and the phone microphone over HTTPS.**
+- **The shop's real Busy export** (importer tested with Busy-style files we made). Look at the preview before saying yes.
+- **A real Samsung call transcript** copied from a phone, and a real call recording through Sarvam upload.
+- **WhatsApp link on a real phone.**
+- Real shop noise and accents; staff using it for a full day.
 
 ## 8. Known limits and next steps
 
 - **Shop-day checklist (pilot):**
-  1. Deploy (`DEPLOY.md`): Chetan creates the host account; `SARVAM_API_KEY` as a secret; volume at `/data`. Start with a fresh `/data` (old test orders would count in the pilot numbers).
-  2. In Busy, export the item list and the account list to Excel (.xlsx) or CSV. On the Items tab: "Busy se items laayein", then "Busy se parties laayein"; check the preview, then "Haan".
-  3. Before using the app, time 5 normal phone orders with a stopwatch (call end → entry done in Busy). Pilot tab → "Pehle ka time" → type the seconds.
-  4. Tick "Practice order" while staff try it out; untick for real orders.
-  5. When a saved order turns out wrong, open it in Orders → "Galat nikla?" → pick why.
-  6. End of day: Pilot tab → "CSV" for the video and the deck.
-- **Next (approved 27 Nov, branch `pilot-ready`):** shop-ready + pilot numbers before 30 Nov. Busy export import for items and parties, parties moved to SQLite, numbers saved with every order (time to confirm, questions, corrections, "Galat nikla"), a Pilot tab with CSV, then deploy and test in the shop. Design: `docs/superpowers/specs/2026-11-27-pilot-ready-design.md`. Why: the Round 2 masterclass (VC speaker) stressed real-user testing in person and before/after numbers; no rubric was published.
-- Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are now in SQLite (seeded from the 7 samples) and both lists can be replaced from a Busy export.
-- Orders can be cancelled or edited until they are dispatched, not deleted. For a clean demo, run with `BKO_DEMO=1` and use Demo reset on the Pilot tab.
-- The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
-- On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
-- No login, one shop only, no dues or payments module (kept out on purpose).
-- Busy integration is CSV only.
-- Optional shop PIN: set `BKO_PIN` on the host and the app asks for it once (kept 90 days as a cookie). Without it the app stays open, as before.
-- Cost: each long call through Sarvam costs money. Measure the cost per order during the pilot; the shop owner said he would pay about ₹2,000 a year.
+  1. Deploy (`DEPLOY.md`): `SARVAM_API_KEY` and `BKO_PIN` as secrets; volume at `/data`; start with a fresh `/data` (old test orders would count in the pilot numbers). Never set `BKO_DEMO` there.
+  2. Items tab: "Busy / Excel se items laayein", then parties; check the preview, then "Haan". No Busy? Fill the blank Excel template.
+  3. Tick "Practice order" and run 5-10 of the shop's old recordings; on each yellow line use "Kisi item se jodo" / "Naya item banao", and "Hatao" for talk. The app learns the shop's words.
+  4. Time 5 normal phone orders with a stopwatch (call end → entry done in Busy). Pilot tab → "Pehle ka time".
+  5. Untick "Practice order" for real orders. When a saved order turns out wrong: Orders → open it → "Galat nikla?" (or Edit / Cancel before dispatch).
+  6. End of day: Pilot tab → "CSV" for the video and the deck; Orders → "Aaj ki Busy CSV" for billing.
+- The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it fall back to recording + server STT, which needs the Sarvam key.
+- On Android Chrome the live mic does not also keep a recording, so "retry with the same recording" only works for uploads and desktop.
+- One shop only; no accounts beyond the optional PIN; no dues or payments (kept out on purpose).
+- Busy integration is CSV only. Bill photo / PDF import was dropped (it would need OCR or an LLM).
+- A Piper voice reads names in English; Hinglish words the app says are mapped to Devanagari by a fixed word list in `app/tts.py` (add new words there).
+- Cost: Sarvam speech-to-text per minute is the only per-order cost; the voice is local and free. Measure the cost per order in the pilot; the shop owner said he would pay about ₹2,000 a year.
 
 ## 9. Demo video plan (≤ 3 min)
 
-1. 0:00–0:20 Problem: parchi + typing into Busy, wrong orders = returns.
-2. 0:20–1:30 Phone, hold **Order bolo**: "ABC wale ko 10 carton sabun, 5 carton tel, kal bhej dena" → read-back → "Kaun sa soap brand?" → "Lux" → "nahi, aath carton" → "haan, pakka" → parchi + CSV.
-3. 1:30–2:00 Upload a WhatsApp voice note with small talk and bargaining; show that it is ignored.
-4. 2:00–2:20 Unknown item → top 3 options, yellow "Pakka nahi hoon".
-5. 2:20–2:40 Dispatch: "Order 3, 4 aur 5 ek hi truck mein gaye" → read-back → "haan pakka". Also show Paste call transcript and the Items page if time allows.
-6. 2:40–3:00 Pilot plan: 3 shops, 30 days, the three numbers we measure.
+1. 0:00–0:20 Problem: parchi + typing into Busy, wrong orders = returns (shop footage).
+2. 0:20–1:20 Phone in the shop, hold **Order bolo** on a real order → the app reads it back in Hindi → one question → "haan, pakka" → parchi, WhatsApp.
+3. 1:20–1:50 Upload a real call recording with chat and bargaining: the talk is ignored; an unknown item is yellow → "Kisi item se jodo" → next order understands it.
+4. 1:50–2:15 Dispatch by voice: "Order 3, 4 aur 5 ek hi truck mein gaye" → read-back → "haan pakka".
+5. 2:15–2:40 Pilot tab: real numbers from the test day (time to confirm vs the stopwatch baseline, % right after saving).
+6. 2:40–3:00 Launch plan: 3 shops, 30 days, the three numbers we measure.
 
 ## 10. Pitch deck notes
 
-- Problem and solution: sections 1 and 4.
-- Users: wholesale shop owners and staff. Start with 3 pilot shops (one has agreed). Do not claim a national count we have not verified.
-- What it depends on: Sarvam STT (the only paid service, per minute), browser speech recognition (free), ffmpeg, SQLite. No LLM. If Sarvam stops working or gets too costly, the live mic switches to the browser's free recogniser and typing always works; only uploads stop until another STT provider is plugged into `app/stt.py`.
-- Launch plan: pilot in 3 shops for 30 days, measure (1) time from end of call to confirmed order, target under 1 minute; (2) returned or re-dispatched orders, target half; (3) 95% of orders saved with no later correction, and staff using it for 15 of 20 daily orders. Then other shops in the same market through the first wholesaler's network.
+- Problem and solution: sections 1 and 4. Show the real shop numbers from the Pilot CSV.
+- Users: wholesale shop owners and staff (kirana, hardware / PVC, pump and motor shops). Start with 3 pilot shops (one has agreed). Do not claim a national count we have not verified.
+- What it depends on: Sarvam speech-to-text (the only paid service, per minute); the browser's free recogniser as a fallback; Piper Hindi voice (local, free); ffmpeg; SQLite. No LLM. If Sarvam stops working or gets too costly, the live mic switches to the browser's recogniser and typing / pasting always works; only recording uploads stop until another STT provider is plugged into `app/stt.py`.
+- Onboarding: Busy export or a filled Excel template; the app learns the shop's own words from the order screen.
+- Launch plan: pilot in 3 shops for 30 days, measure (1) time from end of call to confirmed order, target under 1 minute; (2) returned or re-dispatched orders, target half; (3) 95% of orders right after saving, and staff using it for 15 of 20 daily orders. Then other shops in the same market through the first wholesaler's network.
 
 ## 11. Accounts
 
@@ -166,6 +169,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| docs (branch `docs-update`) | README rewritten for main; HANDOFF sections 1-10 brought up to date (pages, rules, code map, checks, shop-day checklist, demo and deck notes); DEPLOY host notes and checks updated |
 | junk lines (branch `junk-lines`) | From a real pump/motor shop call: a generic word with no quantity ("dal rahe ho" is the verb daalna) and a question about something not on the list ("advertisement kitna pada hoga") no longer become order lines; "bhejun" is filler. Every line has "✕ Hatao" to drop a line the app got wrong (`POST /api/line/remove`, counted as a correction). Real unknown items ("pachas motor", "barah submersible") still become yellow lines |
 | Excel template (branch `excel-template`) | Shops without Busy fill a plain Excel sheet: `GET /api/items/template.xlsx` and `/api/parties/template.xlsx` (header row only, plus a "Kaise bharein" help sheet; no example rows that could be imported by mistake). Import buttons now say "Busy / Excel se ...". The importer reads the sheet that has a Name header even if the help sheet was open when saved, and parties accept a "Spoken names" column. Bill photo / PDF import was considered and dropped: it would need OCR or an LLM |
 | teach items (branch `teach-items`) | A yellow line ("Pakka nahi hoon") now has "Kisi item se jodo" (pick an item; the heard words become its spoken name, unless another item already uses them or it is a generic word like "sabun") and "Naya item banao" (add-item form filled with the heard words; saving links the line). `POST /api/teach`. Only staff link; the app never does. For shops with their own catalog (PVC fittings, pipes, tanks): import Busy first, then teach the words from 5-10 practice recordings. Checked in the browser on a scratch DB |

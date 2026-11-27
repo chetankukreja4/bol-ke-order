@@ -7,3 +7,5 @@ services:
     envVars:
       - key: SARVAM_API_KEY
         sync: false
+      - key: BKO_PIN
+        sync: false

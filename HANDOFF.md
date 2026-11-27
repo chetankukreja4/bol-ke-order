@@ -19,6 +19,7 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 
 | What | Where |
 |---|---|
+| CI (all branches) | `.github/workflows/tests.yml`: every push and PR runs `pytest` and builds the Docker image, starts it with no keys and checks `/healthz` |
 | Code | https://github.com/chetankukreja4/bol-ke-order (public, branch `main`) |
 | Local copy | `E:\scaler\bol-ke-order` |
 | Live URL | Not deployed yet. Plan: Dostack Cloud (see `DEPLOY.md`). |

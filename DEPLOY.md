@@ -74,5 +74,6 @@ New → Blueprint → pick the repo. `render.yaml` sets the Docker build and the
 - The home screen loads and asks for the PIN once; the header shows which keys are set.
 - "Try sample phrases" → the first one → "Kaun sa soap brand?" → Lux → Confirm → parchi; "CSV for billing" downloads.
 - On a phone over HTTPS: hold **Order bolo** and speak an order; the read-back is in the local Hindi voice.
-- Items tab → "Busy / Excel se items laayein" and "Busy / Excel se parties laayein" with the shop's file (or the blank Excel template, filled). Check the preview, then "Haan": it replaces the sample lists.
+- Items tab → "Busy / Excel se items laayein" and "Busy / Excel se parties laayein" with the shop's file (or the blank Excel template, filled). Check the preview, then "Haan": it replaces the whole list, so use one file with all items (not one file per item group).
+- With the shop's list loaded, type an order with a size ("<party> ko 10 elbow 1 inch") and check the read-back says "inch".
 - Pilot tab shows 0 orders on a fresh `/data`.

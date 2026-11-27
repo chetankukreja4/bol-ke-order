@@ -71,7 +71,7 @@ Light and dark theme (follows the phone; 🌙/☀ to switch). Look based on our 
   * No network at Confirm: the order waits on the phone and is saved when the network is back.
 * **Orders**: All / **Aaj jaana** (due today or late) / Pending / Dispatched; **Aaj ki Busy CSV** (every order of the day) and a review sheet.
 * **Dispatch**: "Dispatch bolo" ("ABC ka maal gaya, rickshaw se", "order 3, 4 aur 5 ek hi truck") with read-back and "haan pakka"; a "Waiting to go" list where a tap asks "Pakka?" first.
-* **Items**: the shop's items and parties. **Busy / Excel se items (parties) laayein** with a preview; blank **Excel templates** for shops without Busy; add, edit, remove; search.
+* **Items**: the shop's items and parties. **Busy / Excel se items (parties) laayein** with a preview (an import replaces the whole list, so export all items in one file); blank **Excel templates** for shops without Busy; add, edit, remove; search. Pipe, fitting and pump lists work as they are: sizes like `3/4"`, `2x1''`, `1.5hp` are matched to what staff say ("pauna inch", "do by ek", "dedh hp") and read back the same way.
 * **Pilot**: numbers for the shop test (orders, time to confirm, questions, corrections, orders right after saving, stopwatch "before" times), CSV, and "Practice order" to leave trials out.
 
 ## Data

@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `excel-template`, built on `main` ecc2544). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `junk-lines`, built on `main` 9f3c671). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -87,7 +87,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (look taken from the Codex prototype `bol-ke-order-scaler-round-2`: green ink, lime accent, white cards, pill page nav at the top; light + dark). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
 | `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
-| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py`, `tests/test_tts.py`, `tests/test_improvements.py`, `tests/test_review_fixes.py` | Busy imports, which-party questions, pilot numbers, one test per bug from the 27 Nov full check, the local voice, edit/cancel and the other improvements, and the code-review fixes. 155 tests in all (plus `tests/test_teach.py`, `tests/test_template.py`) |
+| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py`, `tests/test_tts.py`, `tests/test_improvements.py`, `tests/test_review_fixes.py` | Busy imports, which-party questions, pilot numbers, one test per bug from the 27 Nov full check, the local voice, edit/cancel and the other improvements, and the code-review fixes. 163 tests in all (plus `tests/test_teach.py`, `tests/test_template.py`, `tests/test_junk_lines.py`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -95,7 +95,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 155 tests (inside .venv or the container; CI runs them on every push)
+pytest -q                          # 163 tests (inside .venv or the container; CI runs them on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -166,6 +166,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| junk lines (branch `junk-lines`) | From a real pump/motor shop call: a generic word with no quantity ("dal rahe ho" is the verb daalna) and a question about something not on the list ("advertisement kitna pada hoga") no longer become order lines; "bhejun" is filler. Every line has "✕ Hatao" to drop a line the app got wrong (`POST /api/line/remove`, counted as a correction). Real unknown items ("pachas motor", "barah submersible") still become yellow lines |
 | Excel template (branch `excel-template`) | Shops without Busy fill a plain Excel sheet: `GET /api/items/template.xlsx` and `/api/parties/template.xlsx` (header row only, plus a "Kaise bharein" help sheet; no example rows that could be imported by mistake). Import buttons now say "Busy / Excel se ...". The importer reads the sheet that has a Name header even if the help sheet was open when saved, and parties accept a "Spoken names" column. Bill photo / PDF import was considered and dropped: it would need OCR or an LLM |
 | teach items (branch `teach-items`) | A yellow line ("Pakka nahi hoon") now has "Kisi item se jodo" (pick an item; the heard words become its spoken name, unless another item already uses them or it is a generic word like "sabun") and "Naya item banao" (add-item form filled with the heard words; saving links the line). `POST /api/teach`. Only staff link; the app never does. For shops with their own catalog (PVC fittings, pipes, tanks): import Busy first, then teach the words from 5-10 practice recordings. Checked in the browser on a scratch DB |
 | CI compose (branch `ci-compose`) | The Docker CI job now does what the organisers do: `docker compose up --build` with no keys, then `/healthz`, the main screen (`/`, app.js, style.css), "key not set" in `/api/config`, and one typed order through `/api/parse` |

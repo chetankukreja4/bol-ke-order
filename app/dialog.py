@@ -333,6 +333,19 @@ def link_line(d, line_id, code):
     return finish(d)
 
 
+def remove_line(d, line_id):
+    """Staff tapped "Hatao": a line the app got wrong (talk, a repeat) is dropped."""
+    if _line(d, line_id) is None:
+        raise KeyError("line")
+    d["lines"] = [ln for ln in d["lines"] if ln["id"] != line_id]
+    if d.get("question") and d["question"].get("line_id") == line_id:
+        d["question"] = None
+    _count(d, "corrections")
+    if not d["lines"]:
+        d["say"] = "Saari lines hat gayi. Order dobara bolein."
+    return finish(d)
+
+
 def validate_for_save(d):
     """Server-side check before saving. Returns error text or None.
     The browser holds the draft, so nothing in it is trusted: codes must be on

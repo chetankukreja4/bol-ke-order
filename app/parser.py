@@ -26,7 +26,7 @@ _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "pr
                                "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment"]}
 _STOP = {norm(w) for w in [
     "ko", "ka", "ki", "ke", "wale", "wala", "vale", "vala", "bhai", "ji", "sahab", "bhej", "bhejna",
-    "bhejo", "bhejdo", "dena", "de", "dijiye", "dijie", "do", "chahiye", "chaiye", "hai", "hain",
+    "bhejo", "bhejdo", "bhejun", "bhejoon", "bhejdu", "dena", "de", "dijiye", "dijie", "do", "chahiye", "chaiye", "hai", "hain",
     "haan", "han", "ha", "accha", "acha", "theek", "thik", "ok", "okay", "hello", "namaste", "sir",
     "aur", "and", "bhi", "bas", "please", "plz", "order", "likho", "likh", "lo", "le", "lena", "maal",
     "saman", "saamaan", "samaan", "wo", "woh", "vo", "ye", "yeh", "jo", "the", "a", "of", "mein",
@@ -62,6 +62,7 @@ def today():
     return datetime.now(IST).date()
 
 
+_ASKING = {"kitna", "kitne", "kitni", "kaisa", "kaise", "kaisi", "kaun", "kyun", "kab"}  # question words
 _NOT_WORDS = {"nahi", "nahin", "nai", "na", "mat", "not", "no"}
 
 
@@ -203,8 +204,9 @@ def extract_rules(text: str):
             named_item = _named_item(toks, party_tokens)
             last_item = named_item or last_item
             # "ABC ko Lux bhejna kal": an item with no quantity is a line, and the app asks "kitna?"
-            if named_item and not _is_bargain(toks) and not (_QUESTION_WORDS | {"kitna", "kitne", "kaisa", "kaise"}) & set(toks) \
-                    and not _already_listed(named_item, lines):
+            # only a clearly named item: a generic word alone ("dal rahe ho" is the verb daalna) is talk
+            if named_item and match_item(" ".join(named_item))["status"] == "ok" and not _is_bargain(toks) \
+                    and not (_QUESTION_WORDS | _ASKING) & set(toks) and not _already_listed(named_item, lines):
                 lines.append({"heard": " ".join(toks), "item_text": " ".join(named_item),
                               "qty_values": [], "unit": None, "note": None})
             continue
@@ -231,6 +233,9 @@ def extract_rules(text: str):
                 item = list(last_item)
             elif item:
                 last_item = item
+            # "advertisement kitna pada hoga": a question about something not on the list is talk, not an order
+            if item and (_QUESTION_WORDS | _ASKING) & set(toks) and match_item(" ".join(item))["status"] != "ok":
+                continue
             lines.append({
                 "heard": " ".join(toks[start:stop]) if item else " ".join(toks),
                 "item_text": " ".join(item),

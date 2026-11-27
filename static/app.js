@@ -379,7 +379,7 @@ function lineHtml(ln) {
   const name = ln.item ? ln.item.name : (ln.group ? `${ln.group}?` : (ln.item_text || '?'));
   const flag = ln.uncertain ? '<div class="flag">⚠ Pakka nahi hoon.</div>' : '';
   // a line whose item is not settled: staff can link it (and teach the words) or make a new item
-  const teachBtns = ln.match !== 'ok' ? `<div class="teach"><button class="btn btn-outline btn-xs" data-jodo="${esc(ln.id)}">🔗 Kisi item se jodo</button><button class="btn btn-outline btn-xs" data-naya="${esc(ln.id)}">＋ Naya item banao</button></div>` : '';
+  const teachBtns = `<div class="teach">${ln.match !== 'ok' ? `<button class="btn btn-outline btn-xs" data-jodo="${esc(ln.id)}">🔗 Kisi item se jodo</button><button class="btn btn-outline btn-xs" data-naya="${esc(ln.id)}">＋ Naya item banao</button>` : ''}<button class="btn btn-outline btn-xs hatao" data-hatao="${esc(ln.id)}" title="Ye line order mein nahi hai">✕ Hatao</button></div>`;
   const note = ln.note ? `<div class="flag cond">❓ Shart: "${esc(ln.note)}" — party se poochh kar tay karein</div>` : '';
   return `<div class="line ${ln.uncertain ? 'unsure' : ''}">
     <div class="qty">${esc(qty)}<small>${esc(ln.unit || '')}</small></div>
@@ -399,6 +399,12 @@ function renderConfirm(speakIt) {
   $('cfLines').innerHTML = d.lines.map(lineHtml).join('');
   $('cfLines').querySelectorAll('[data-jodo]').forEach((b) => b.onclick = () => openTeach(b.dataset.jodo));
   $('cfLines').querySelectorAll('[data-naya]').forEach((b) => b.onclick = () => newItemForLine(b.dataset.naya));
+  $('cfLines').querySelectorAll('[data-hatao]').forEach((b) => b.onclick = async () => {
+    try {
+      state.draft = await post('/api/line/remove', { draft: state.draft, line_id: b.dataset.hatao });
+      renderConfirm(false);
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message); }
+  });
   const q = d.question, qb = $('cfQuestion');
   if (q) {
     qb.classList.remove('hidden');

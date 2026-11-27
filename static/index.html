@@ -15,7 +15,7 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=17">
+<link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 <body>
 <header class="top no-print">
@@ -279,7 +279,16 @@
   </form>
 </dialog>
 
+<!-- link a "Pakka nahi hoon" line to an item (teach the app the shop's words) -->
+<dialog id="teachDlg" class="dlg">
+  <div class="page-h"><h2>Kisi item se jodo</h2><button type="button" class="x" id="teachClose" aria-label="Close">✕</button></div>
+  <p class="sub" id="teachHeard"></p>
+  <label class="check"><input id="teachLearn" type="checkbox" checked><span id="teachLearnLabel">Ye shabd yaad rakho</span></label>
+  <input id="teachSearch" type="search" placeholder="Item ka naam, code ya spoken name" autocomplete="off">
+  <div id="teachList" class="list teach-list"></div>
+</dialog>
+
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>

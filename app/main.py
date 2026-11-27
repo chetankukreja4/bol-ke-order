@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from . import db, stt
 from . import catalog
 from .catalog import CATALOG, GROUP_LABEL, GROUP_WORDS, PARTIES, UNITS
-from .dialog import answer, build_draft, draft_from_order, validate_for_save
+from .dialog import answer, build_draft, draft_from_order, link_line, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
@@ -380,6 +380,49 @@ def _csv(rows):
             w.writerow([o["id"], o["party"], ln["code"], ln["name"], ln["qty"], ln["unit"], o["delivery_date"], o["status"]])
     buf.seek(0)
     return buf
+
+
+class TeachIn(BaseModel):
+    draft: dict
+    line_id: str
+    code: str
+    learn: bool = True
+
+
+def _learnable(words):
+    """Heard words worth keeping as a spoken name: real words, not a generic
+    group word like "sabun" (that one must keep asking which brand)."""
+    from .textnorm import norm
+    w = norm(words or "").strip()
+    generic = {norm(x) for ws in catalog.GROUP_WORDS.values() for x in ws}
+    return w if len(w) >= 3 and any(ch.isalpha() for ch in w) and w not in generic else ""
+
+
+@app.post("/api/teach")
+def teach(body: TeachIn):
+    """Link a "Pakka nahi hoon" line to an item the staff chose, and learn the
+    words that were heard as that item's spoken name, so next time they match."""
+    code = body.code.strip().upper()
+    if code not in catalog.ITEMS_BY_CODE:
+        raise HTTPException(400, "Item nahi mila")
+    line = next((ln for ln in body.draft.get("lines", []) if ln.get("id") == body.line_id), None)
+    if line is None:
+        raise HTTPException(400, "Line nahi mili")
+    words = _learnable(line.get("item_text"))
+    learned, note = False, None
+    if body.learn and words:
+        item = db.get_item(code)
+        other = next((o for o in catalog.CATALOG if o["code"] != code and
+                      words in {a.lower() for a in o["aliases"]} | {o["name"].lower()}), None)
+        if other:
+            note = f"'{words}' pehle se {other['name']} ka naam hai, isliye yaad nahi kiya"
+        elif words not in item["aliases"]:
+            item["aliases"] = (item["aliases"] + [words])[:30]
+            db.save_item(item, old_code=code)
+            catalog.replace_items(db.list_items())
+            learned = True
+    d = link_line(copy.deepcopy(body.draft), body.line_id, code)
+    return {"draft": d, "learned": learned, "note": note}
 
 
 class WrongIn(BaseModel):

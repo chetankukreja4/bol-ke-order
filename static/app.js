@@ -378,11 +378,13 @@ function lineHtml(ln) {
   const qty = ln.qty !== null && ln.qty !== undefined ? ln.qty : (ln.qty_alts.length ? ln.qty_alts.join(' / ') : '?');
   const name = ln.item ? ln.item.name : (ln.group ? `${ln.group}?` : (ln.item_text || '?'));
   const flag = ln.uncertain ? '<div class="flag">⚠ Pakka nahi hoon.</div>' : '';
+  // a line whose item is not settled: staff can link it (and teach the words) or make a new item
+  const teachBtns = ln.match !== 'ok' ? `<div class="teach"><button class="btn btn-outline btn-xs" data-jodo="${esc(ln.id)}">🔗 Kisi item se jodo</button><button class="btn btn-outline btn-xs" data-naya="${esc(ln.id)}">＋ Naya item banao</button></div>` : '';
   const note = ln.note ? `<div class="flag cond">❓ Shart: "${esc(ln.note)}" — party se poochh kar tay karein</div>` : '';
   return `<div class="line ${ln.uncertain ? 'unsure' : ''}">
     <div class="qty">${esc(qty)}<small>${esc(ln.unit || '')}</small></div>
     <div class="name">${esc(name)}${ln.item ? ` <small>(${esc(ln.item.code)})</small>` : ''}</div>
-    <div class="heard-as">heard: "${esc(ln.heard)}"</div>${note}${flag}</div>`;
+    <div class="heard-as">heard: "${esc(ln.heard)}"</div>${note}${flag}${teachBtns}</div>`;
 }
 
 let answerMic;
@@ -395,6 +397,8 @@ function renderConfirm(speakIt) {
   $('cfParty').innerHTML = d.party.status === 'ok' ? esc(d.party.party.name) : '<span class="miss">Party ?</span>';
   $('cfDate').innerHTML = d.delivery ? `Delivery: ${esc(d.delivery.label)} (${esc(d.delivery.date)})` : '<span class="miss">Delivery ?</span>';
   $('cfLines').innerHTML = d.lines.map(lineHtml).join('');
+  $('cfLines').querySelectorAll('[data-jodo]').forEach((b) => b.onclick = () => openTeach(b.dataset.jodo));
+  $('cfLines').querySelectorAll('[data-naya]').forEach((b) => b.onclick = () => newItemForLine(b.dataset.naya));
   const q = d.question, qb = $('cfQuestion');
   if (q) {
     qb.classList.remove('hidden');
@@ -752,6 +756,9 @@ function initItems() {
   $('itemSearch').addEventListener('input', renderItems);
   $('itemAdd').onclick = () => openItem(null);
   $('itemClose').onclick = () => $('itemDlg').close();
+  $('itemDlg').addEventListener('close', () => { if (!$('screen-confirm').classList.contains('active')) state.teachLine = null; });
+  $('teachClose').onclick = () => $('teachDlg').close();
+  $('teachSearch').addEventListener('input', renderTeachList);
   $('itemForm').onsubmit = (e) => { e.preventDefault(); saveItem(); };
   $('itemDelete').onclick = deleteItem;
   $('partySearch').addEventListener('input', renderParties);
@@ -848,6 +855,54 @@ function openItem(item) {
   (item ? $('fName') : $('fName')).focus();
 }
 
+// ------------------------------------------------------------ teach the app
+const lineById = (id) => (state.draft?.lines || []).find((l) => l.id === id);
+async function linkLine(lineId, code, learn) {
+  const r = await post('/api/teach', { draft: state.draft, line_id: lineId, code, learn });
+  state.draft = r.draft;
+  const ln = lineById(lineId);
+  if (r.learned) toast(`Yaad kar liya: "${ln?.item_text}" = ${ln?.item?.name}`, 4000);
+  else if (r.note) toast(r.note, 5000);
+  renderConfirm(false);
+}
+async function openTeach(lineId) {
+  const ln = lineById(lineId);
+  if (!ln) return;
+  state.teachLine = lineId;
+  $('teachHeard').innerHTML = `Suna: <b>"${esc(ln.item_text || ln.heard)}"</b>${ln.qty != null ? ` · ${esc(ln.qty)} ${esc(ln.unit || '')}` : ''}`;
+  $('teachLearnLabel').textContent = ln.item_text ? `"${ln.item_text}" ko is item ka naam yaad rakho` : 'Ye shabd yaad rakho';
+  $('teachLearn').checked = !!ln.item_text;
+  $('teachSearch').value = '';
+  if (!state.items) { try { state.items = await api('/api/items'); } catch (_) { state.items = []; } }
+  renderTeachList();
+  $('teachDlg').showModal();
+  $('teachSearch').focus();
+}
+function renderTeachList() {
+  const q = $('teachSearch').value.trim().toLowerCase();
+  const rows = (state.items || []).filter((i) => !q || [i.code, i.name, ...i.aliases].some((t) => t.toLowerCase().includes(q))).slice(0, 60);
+  $('teachList').innerHTML = rows.length ? rows.map((i) => `<button class="row-card" data-code="${esc(i.code)}"><span class="code">${esc(i.code)}</span>
+      <div class="rc-main"><b>${esc(i.name)}</b><small class="muted">${esc(i.aliases.slice(0, 6).join(', '))}</small></div></button>`).join('')
+    : empty(q ? `"${esc(q)}" jaisa koi item nahi. "Naya item banao" dabayein.` : 'Koi item nahi.');
+  $('teachList').querySelectorAll('[data-code]').forEach((b) => b.onclick = async () => {
+    try {
+      await linkLine(state.teachLine, b.dataset.code, $('teachLearn').checked);
+      $('teachDlg').close();
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message, 4000); }
+  });
+}
+// "Naya item banao": the add-item form, filled with what was heard; saving it links the line.
+function newItemForLine(lineId) {
+  const ln = lineById(lineId);
+  if (!ln) return;
+  openItem(null);
+  state.teachLine = lineId;
+  const words = (ln.item_text || '').trim();
+  $('fName').value = words.replace(/\b\w/g, (c) => c.toUpperCase());
+  $('fAliases').value = words;
+  if (ln.unit) $('fUnit').value = ln.unit;
+}
+
 async function saveItem() {
   const body = {
     code: $('fCode').value, name: $('fName').value, unit: $('fUnit').value,
@@ -863,7 +918,12 @@ async function saveItem() {
     }, 1);
     $('itemDlg').close();
     toast(was ? `${saved.name} updated` : `${saved.name} added`);
+    state.items = null;
     loadItems();
+    if (!was && state.teachLine && lineById(state.teachLine)) { // made from an order line: link it now
+      const lineId = state.teachLine; state.teachLine = null;
+      await linkLine(lineId, saved.code, false);
+    }
   } catch (e) {
     err.textContent = e.network ? 'Network nahi hai, dobara Save dabayein.' : e.message;
     err.classList.remove('hidden');

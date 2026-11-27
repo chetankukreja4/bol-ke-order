@@ -395,3 +395,4 @@ h2.saved { margin: 0 0 6px; font-size: clamp(30px, 4.5vw, 44px); color: var(--in
 .teach .btn { background: var(--card); }
 .teach-list { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
 .teach-list .row-card { padding: 10px 4px; }
+.teach .hatao { margin-left: auto; color: var(--red); border-color: transparent; background: transparent; }

@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from . import db, stt
 from . import catalog
 from .catalog import CATALOG, GROUP_LABEL, GROUP_WORDS, PARTIES, UNITS
-from .dialog import answer, build_draft, draft_from_order, link_line, validate_for_save
+from .dialog import answer, build_draft, draft_from_order, link_line, remove_line, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
@@ -439,6 +439,20 @@ def teach(body: TeachIn):
             learned = True
     d = link_line(copy.deepcopy(body.draft), body.line_id, code)
     return {"draft": d, "learned": learned, "note": note}
+
+
+class LineIn(BaseModel):
+    draft: dict
+    line_id: str
+
+
+@app.post("/api/line/remove")
+def line_remove(body: LineIn):
+    """Drop a line the app got wrong ("Hatao"), e.g. talk from a call."""
+    try:
+        return remove_line(copy.deepcopy(body.draft), body.line_id)
+    except KeyError:
+        raise HTTPException(400, "Line nahi mili")
 
 
 class WrongIn(BaseModel):

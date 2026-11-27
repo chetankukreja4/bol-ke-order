@@ -389,6 +389,8 @@ let answerMic;
 function renderConfirm(speakIt) {
   const d = state.draft;
   show('confirm');
+  const tag = document.querySelector('#screen-confirm .pill.pending');
+  if (tag) tag.textContent = d.edit_of != null ? `Order #${d.edit_of} badal rahe hain` : 'Not saved';
   $('cfHeard').textContent = d.heard;
   $('cfParty').innerHTML = d.party.status === 'ok' ? esc(d.party.party.name) : '<span class="miss">Party ?</span>';
   $('cfDate').innerHTML = d.delivery ? `Delivery: ${esc(d.delivery.label)} (${esc(d.delivery.date)})` : '<span class="miss">Delivery ?</span>';
@@ -430,6 +432,14 @@ async function saveOrder() {
     renderDone();
     speak(`Order ${state.order.id} save ho gaya.`);
   } catch (e) {
+    if (e.network && state.draft?.draft_id && state.draft.edit_of == null) {
+      // keep it on the phone; it is sent when the network is back
+      writeQueue([...readQueue().filter((x) => x.draft.draft_id !== state.draft.draft_id), { draft: state.draft, at: Date.now() }]);
+      toast('Network nahi hai. Order phone mein rakha hai, network aate hi save ho jayega.', 5000);
+      state.draft = null; state.blob = null; state.startedAt = null;
+      show('order');
+      return;
+    }
     toast(e.network ? 'Network nahi hai. Order abhi save nahi hua, dobara dabayein.' : e.message, 4000);
     $('cfConfirm').disabled = !state.draft?.ready; // a retry sends the same draft: still one order
   } finally {
@@ -453,7 +463,71 @@ function renderDone(viewOnly) {
   // What the app heard is for staff to check on screen only; it is not printed.
   $('dnHeard').innerHTML = o.heard_text ? `<b>App ne suna:</b> "${esc(o.heard_text)}"` : '';
   $('dnCsv').href = `/api/orders/${o.id}/csv`;
+  const open = o.status === 'confirmed';
+  $('dnEdit').classList.toggle('hidden', !open);
+  $('dnCancel').classList.toggle('hidden', !open);
+  $('dnTitle').textContent = o.status === 'cancelled' ? `Parchi #${o.id} · cancelled` : $('dnTitle').textContent;
+  $('dnWa').onclick = () => window.open(`https://wa.me/?text=${encodeURIComponent(parchiText(o))}`, '_blank', 'noopener');
+  $('dnEdit').onclick = () => editOrder(o.id);
+  $('dnCancel').onclick = () => cancelOrder(o);
   renderWrong();
+}
+
+// Parchi as plain text for WhatsApp (the shop picks the contact in WhatsApp).
+function parchiText(o) {
+  const lines = o.lines.map((l, i) => `${i + 1}. ${l.name} — ${l.qty} ${l.unit}`).join('\n');
+  return `*Parchi #${o.id}*\n${o.party}\nDelivery: ${o.delivery_date}\n\n${lines}\n\n— Bol-ke-Order`;
+}
+
+// Edit: the saved order comes back to "Check the order"; voice or taps change it; Confirm saves under the same number.
+async function editOrder(id) {
+  try {
+    state.draft = await api(`/api/orders/${id}/draft`);
+    state.startedAt = null;
+    renderConfirm(true);
+  } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message, 4000); }
+}
+
+async function cancelOrder(o) {
+  if (!window.confirm(`Order #${o.id} (${o.party}) cancel karein? Ye wapas nahi hoga.`)) return;
+  try {
+    state.order = await post(`/api/orders/${o.id}/cancel`, {});
+    toast(`Order #${o.id} cancel ho gaya`);
+    renderDone(true);
+    loadOrders();
+  } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message, 4000); }
+}
+
+// Offline: a confirmed order that could not reach the server waits on the phone
+// and is sent when the network is back. The draft id stops it being saved twice.
+const QUEUE_KEY = 'bko-queue';
+const readQueue = () => { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch (_) { return []; } };
+const writeQueue = (q) => { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (_) {} renderQueuePill(); };
+function renderQueuePill() {
+  const n = readQueue().length;
+  let p = document.querySelector('#pills [data-queue]');
+  if (!n) { p?.remove(); return; }
+  if (!p) { p = document.createElement('span'); p.className = 'pill queue'; p.dataset.queue = '1'; $('pills').appendChild(p); }
+  p.textContent = `${n} order ruka hai`;
+}
+let flushing = false;
+async function flushQueue() {
+  if (flushing || !navigator.onLine) return;
+  flushing = true;
+  try {
+    for (const item of readQueue()) {
+      try {
+        const o = await api('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: item.draft }) }, 1);
+        writeQueue(readQueue().filter((x) => x.draft.draft_id !== item.draft.draft_id));
+        toast(`Ruka hua order #${o.id} save ho gaya`);
+      } catch (e) {
+        if (e.network) break; // still offline: try later
+        writeQueue(readQueue().filter((x) => x.draft.draft_id !== item.draft.draft_id));
+        toast(`Ruka hua order save nahi hua: ${e.message}`, 5000);
+      }
+    }
+  } finally { flushing = false; }
+  if (location.hash === '#orders' || location.hash === '#dispatch') loadOrders();
 }
 
 // "Galat nikla": the saved order turned out wrong. Counted in the pilot numbers.
@@ -599,7 +673,7 @@ function initTheme() {
 // ------------------------------------------------------------------ misc
 const MODES = ['rickshaw', 'tempo', 'truck', 'auto', 'self pickup'];
 const orderSummary = (o) => o.lines.map((l) => `${esc(l.qty)} ${esc(l.unit)} ${esc(l.name)}`).join(', ');
-const badge = (o) => `<span class="badge ${o.status}">${o.status === 'confirmed' ? 'pending' : 'dispatched'}${o.dispatch_mode ? ' · ' + esc(o.dispatch_mode) : ''}</span>`;
+const badge = (o) => `<span class="badge ${o.status}">${o.status === 'confirmed' ? 'pending' : o.status === 'cancelled' ? 'cancelled' : 'dispatched'}${o.dispatch_mode ? ' · ' + esc(o.dispatch_mode) : ''}</span>`;
 const empty = (msg) => `<div class="empty">${msg}</div>`;
 
 async function loadOrders() {
@@ -615,7 +689,10 @@ function renderOrders() {
   const box = $('orders');
   if (!state.orders) { box.innerHTML = empty('Could not load orders (offline?).'); return; }
   const f = state.filter || 'all';
-  const rows = state.orders.filter((o) => f === 'all' || o.status === f);
+  const today = state.cfg?.today || new Date().toISOString().slice(0, 10);
+  const rows = f === 'today' // waiting to go and due today (or already late), earliest first
+    ? state.orders.filter((o) => o.status === 'confirmed' && o.delivery_date <= today).sort((a, b) => a.delivery_date.localeCompare(b.delivery_date) || a.id - b.id)
+    : state.orders.filter((o) => f === 'all' || o.status === f);
   box.innerHTML = rows.length ? rows.map((o) => `<button class="row-card" data-id="${o.id}">
       <div class="rc-main"><b>#${o.id} ${esc(o.party)}</b><small>${orderSummary(o)}</small><small class="muted">Delivery ${esc(o.delivery_date)}</small></div>
       ${badge(o)}</button>`).join('') : empty(f === 'all' ? 'No orders yet. Speak one on the Order tab.' : 'Nothing here.');
@@ -874,6 +951,18 @@ async function init() {
     renderOrders();
   });
   initItems();
+  renderQueuePill();
+  flushQueue();
+  window.addEventListener('online', flushQueue);
+  setInterval(() => { if (readQueue().length) flushQueue(); }, 30000);
+  if (c.demo) {
+    $('demoCard').classList.remove('hidden');
+    $('demoReset').onclick = async () => {
+      if ($('demoConfirm').value.trim() !== 'RESET') return toast('Pakka karne ke liye RESET likhein');
+      try { await post('/api/demo/reset', { confirm: 'RESET' }); toast('Demo data saaf ho gaya'); setTimeout(() => location.reload(), 800); }
+      catch (e) { toast(e.message, 4000); }
+    };
+  }
   window.addEventListener('hashchange', route);
   route();
 }

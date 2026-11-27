@@ -38,7 +38,7 @@ from pydantic import BaseModel
 from . import db, stt
 from . import catalog
 from .catalog import CATALOG, GROUP_LABEL, GROUP_WORDS, PARTIES, UNITS
-from .dialog import answer, build_draft, validate_for_save
+from .dialog import answer, build_draft, draft_from_order, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
@@ -126,6 +126,8 @@ def config():
     return {
         "server_stt": stt.stt_available(),
         "server_tts": tts.available(),  # local Piper voice; otherwise the browser speaks
+        "demo": os.getenv("BKO_DEMO") == "1",
+        "today": __import__("app.parser", fromlist=["today"]).today().isoformat(),
         "stt_message": None if stt.stt_available() else "Speech key not set (SARVAM_API_KEY). Live mic uses the browser; uploads are off.",
         "catalog": CATALOG, "parties": PARTIES, "test_phrases": TEST_PHRASES,
         "units": list(UNITS), "groups": [{"key": g, "label": GROUP_LABEL.get(g, g), "words": w}
@@ -311,7 +313,35 @@ def create_order(body: DraftIn):
     for ln in d["lines"]:
         ln["item"]["name"] = catalog.ITEMS_BY_CODE[ln["item"]["code"]]["name"]
     d["heard"] = str(d.get("heard") or "")[:5000]
+    if d.get("edit_of") is not None:  # an edited order keeps its number
+        o = db.get_order(int(d["edit_of"]))
+        if not o:
+            raise HTTPException(404, "Order not found")
+        if o["status"] != "confirmed":
+            raise HTTPException(409, f"Order {o['id']} ab badal nahi sakta ({o['status']})")
+        return db.update_order(o["id"], d)
     return db.save_order(d)
+
+
+@app.get("/api/orders/{order_id}/draft")
+def order_as_draft(order_id: int):
+    """Edit a saved order: it comes back as a draft for the Check-the-order screen."""
+    o = db.get_order(order_id)
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o["status"] != "confirmed":
+        raise HTTPException(409, f"Order {order_id} ab badal nahi sakta ({o['status']})")
+    return draft_from_order(o)
+
+
+@app.post("/api/orders/{order_id}/cancel")
+def order_cancel(order_id: int):
+    o = db.get_order(order_id)
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o["status"] != "confirmed":
+        raise HTTPException(409, f"Order {order_id} cancel nahi ho sakta ({o['status']})")
+    return db.cancel_order(order_id)
 
 
 @app.get("/api/orders")
@@ -388,9 +418,35 @@ def order_csv(order_id: int):
 
 
 @app.get("/api/orders.csv")
-def all_csv():
+def all_csv(day: str | None = None):
+    """Review sheet of the latest orders, or with ?day=today (or YYYY-MM-DD) every
+    order saved that day, for entering into Busy in one go."""
+    if day:
+        from .parser import today as _today
+        d = _today().isoformat() if day == "today" else day
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            raise HTTPException(400, "day must be today or YYYY-MM-DD")
+        return StreamingResponse(_csv(db.orders_on_day(d)), media_type="text/csv",
+                                 headers={"Content-Disposition": f'attachment; filename="busy-orders-{d}.csv"'})
     return StreamingResponse(_csv(db.list_orders(500)), media_type="text/csv",
                              headers={"Content-Disposition": 'attachment; filename="orders-review.csv"'})
+
+
+class ResetIn(BaseModel):
+    confirm: str
+
+
+@app.post("/api/demo/reset")
+def demo_reset(body: ResetIn):
+    """Clean data for a demo video. Off unless BKO_DEMO=1, and needs "RESET" typed."""
+    if os.getenv("BKO_DEMO") != "1":
+        raise HTTPException(403, "Demo reset is off (set BKO_DEMO=1)")
+    if body.confirm.strip() != "RESET":
+        raise HTTPException(400, "Type RESET to confirm")
+    db.reset_demo()
+    catalog.replace_items(db.list_items())
+    catalog.replace_parties(db.list_parties())
+    return {"ok": True}
 
 
 def _orders_say(orders):

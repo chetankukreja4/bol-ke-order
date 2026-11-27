@@ -383,3 +383,11 @@ h2.saved { margin: 0 0 6px; font-size: clamp(30px, 4.5vw, 44px); color: var(--in
 .upload-btn { margin-top: 0; }
 .inline-card .actions .btn { flex: 1 1 0; }
 .inline-card .actions .btn.hidden { display: none !important; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.split .btn { width: 100%; }
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.pill.queue { background: var(--warn); border-color: var(--q-line); color: var(--warn-ink); }
+.badge.cancelled { background: transparent; color: var(--red); border-color: var(--red); }
+@media (max-width: 720px) { .head-actions { max-width: 50%; } .head-actions .btn { font-size: 12px; min-height: 40px; padding: 6px 10px; } }
+.seg button { white-space: nowrap; }
+@media (max-width: 720px) { .seg { gap: 3px; padding: 4px; } .seg button { font-size: 12px; padding: 0 4px; min-height: 38px; } }

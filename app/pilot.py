@@ -72,7 +72,7 @@ def _is_test(o):
 
 def summary(orders, baseline):
     """The numbers for the deck. Practice orders are left out of everything."""
-    real = [o for o in orders if not _is_test(o)]
+    real = [o for o in orders if not _is_test(o) and o.get("status") != "cancelled"]
     with_stats = [o for o in real if o.get("stats")]
     times = [o["seconds_to_confirm"] for o in real if o.get("seconds_to_confirm") is not None]
     by_source, wrong = {}, {}
@@ -102,6 +102,8 @@ def summary(orders, baseline):
 def csv_rows(orders):
     rows = [CSV_HEADER]
     for o in orders:
+        if o.get("status") == "cancelled":
+            continue
         st = o.get("stats") or {}
         rows.append([o["id"], o["created_at"], o["party"], len(o["lines"]), st.get("source", ""),
                      bool(st.get("test")), o.get("seconds_to_confirm"), st.get("questions", ""),

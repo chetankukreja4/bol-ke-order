@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 
 NEW_ORDER_COLUMNS = [("stats", "TEXT"), ("seconds_to_confirm", "REAL"),
                      ("wrong_reason", "TEXT"), ("wrong_at", "TEXT"),
-                     ("draft_id", "TEXT")]  # one draft = one order, even if Confirm is tapped twice
+                     ("draft_id", "TEXT"), ("edited_at", "TEXT"), ("cancelled_at", "TEXT")]  # one draft = one order, even if Confirm is tapped twice
 
 
 def _conn():
@@ -70,6 +70,7 @@ def _row(r):
         "stats": json.loads(r["stats"]) if r["stats"] else None,
         "seconds_to_confirm": r["seconds_to_confirm"],
         "wrong_reason": r["wrong_reason"], "wrong_at": r["wrong_at"],
+        "edited_at": r["edited_at"], "cancelled_at": r["cancelled_at"],
     }
 
 
@@ -149,6 +150,58 @@ def mark_wrong(order_id, reason):
         n = c.execute("UPDATE orders SET wrong_reason=?, wrong_at=? WHERE id=?",
                       (reason, datetime.now(IST).isoformat(timespec="seconds"), order_id)).rowcount
         return get_order(order_id, c) if n else None
+
+
+def update_order(order_id, draft):
+    """Edit: the order keeps its number, time and pilot numbers; party, lines and
+    delivery are replaced. Only for an order that has not gone out."""
+    lines = draft["lines"]
+    with _conn() as c:
+        c.execute(
+            "UPDATE orders SET party=?, party_code=?, items=?, quantities=?, units=?, delivery_date=?, edited_at=?"
+            " WHERE id=? AND status='confirmed'",
+            (draft["party"]["party"]["name"], draft["party"]["party"]["code"],
+             json.dumps([{"code": l["item"]["code"], "name": l["item"]["name"]} for l in lines]),
+             json.dumps([l["qty"] for l in lines]), json.dumps([l["unit"] for l in lines]),
+             draft["delivery"]["date"], datetime.now(IST).isoformat(timespec="seconds"), order_id))
+        return get_order(order_id, c)
+
+
+def cancel_order(order_id):
+    with _conn() as c:
+        c.execute("UPDATE orders SET status='cancelled', cancelled_at=? WHERE id=? AND status='confirmed'",
+                  (datetime.now(IST).isoformat(timespec="seconds"), order_id))
+        return get_order(order_id, c)
+
+
+def orders_on_day(day):
+    """Every order saved on that day (YYYY-MM-DD), oldest first, except cancelled ones."""
+    with _conn() as c:
+        return [_row(r) for r in c.execute(
+            "SELECT * FROM orders WHERE substr(created_at, 1, 10)=? AND status!='cancelled' ORDER BY id", (day,))]
+
+
+def top_item_codes(limit=30, days=60):
+    """Item codes the shop orders most (by number of orders, recent days)."""
+    from collections import Counter
+    since = (today() - __import__("datetime").timedelta(days=days)).isoformat()
+    count = Counter()
+    with _conn() as c:
+        for r in c.execute("SELECT items FROM orders WHERE created_at>=? AND status!='cancelled'", (since,)):
+            for it in {i["code"] for i in json.loads(r["items"])}:
+                count[it] += 1
+    return [code for code, _ in count.most_common(limit)]
+
+
+def reset_demo():
+    """Demo only: delete every order and the baseline, put the sample items and parties back."""
+    from .catalog import SAMPLE_ITEMS, SAMPLE_PARTIES
+    with _conn() as c:
+        c.execute("DELETE FROM orders")
+        c.execute("DELETE FROM sqlite_sequence WHERE name='orders'")
+        c.execute("DELETE FROM meta WHERE k='baseline_seconds'")
+    replace_items([dict(i, aliases=list(i["aliases"])) for i in SAMPLE_ITEMS])
+    replace_parties([dict(p, aliases=list(p["aliases"])) for p in SAMPLE_PARTIES])
 
 
 def clear_wrong(order_id):

@@ -288,6 +288,30 @@ def answer(d, text: str):
     return finish(d), "updated"
 
 
+def draft_from_order(o):
+    """A saved order back as a draft, to correct by voice ("nahi, aath carton",
+    "aur 2 bori cheeni") and save again under the same number."""
+    from datetime import date
+    lines = []
+    for ln in o["lines"]:
+        known = ln["code"] in ITEMS_BY_CODE
+        m = None if known else match_item(ln["name"])
+        lines.append(_refresh_line({
+            "id": uuid.uuid4().hex[:8], "heard": "", "item_text": ln["name"],
+            "match": "ok" if known else m["status"], "item": item_option(ln["code"]) if known else m["item"],
+            "options": [] if known else m["options"], "group": ITEMS_BY_CODE[ln["code"]].get("group") if known else m["group"],
+            "qty": ln["qty"], "qty_alts": [], "unit": ln["unit"], "heard_unit": True, "note": None}))
+    party_ok = o["party_code"] in PARTIES_BY_CODE
+    when = date.fromisoformat(o["delivery_date"])
+    label = {0: "aaj", 1: "kal", 2: "parso"}.get((when - today()).days, o["delivery_date"])
+    d = {"heard": o.get("heard_text") or "", "lines": lines, "notice": None, "warning": None,
+         "party": {"status": "ok", "party": party_option(o["party_code"]), "options": []} if party_ok
+         else {"status": "missing", "party": None, "options": []},
+         "delivery": {"date": o["delivery_date"], "label": label, "heard": ""},
+         "edit_of": o["id"], "draft_id": uuid.uuid4().hex}
+    return finish(d)
+
+
 def validate_for_save(d):
     """Server-side check before saving. Returns error text or None.
     The browser holds the draft, so nothing in it is trusted: codes must be on

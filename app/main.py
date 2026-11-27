@@ -322,13 +322,13 @@ def parse(body: TextIn):
     text = body.text.strip()
     if body.kind == "transcript" or looks_like_transcript(text):
         cleaned = clean_transcript(text)
-        draft = build_draft(cleaned["text"])
+        draft = build_draft(cleaned["text"], call=True)
         draft["source"] = "transcript"
         draft["turns"] = cleaned["turns"]
         draft["stats"] = pilot.new_stats("transcript", draft, body.test, body.elapsed, body.carry)
         draft["draft_id"] = uuid.uuid4().hex
         return draft
-    draft = build_draft(text)
+    draft = build_draft(text, call=body.source == "upload")  # a call recording
     draft["stats"] = pilot.new_stats(body.source, draft, body.test, body.elapsed, body.carry)
     draft["draft_id"] = uuid.uuid4().hex
     return draft

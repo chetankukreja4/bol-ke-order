@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from .catalog import DISPATCH_MODES, UNITS
-from .matcher import find_party, match_item
+from .matcher import find_party, is_item_word, match_item
 from .textnorm import WEAK_NUMBER_WORDS, is_size, norm, parse_number_at
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -25,7 +25,7 @@ _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "pr
                                "rupay", "rupaye", "rupee", "rs", "percent", "kam", "mehnga",
                                "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment",
                                "kiraya", "kiraye", "kirae", "bhada", "bhaada", "fare", "rupees"]}
-_MONEY = {norm(w) for w in ["rupay", "rupaye", "rupee", "rupees", "rs", "rupya", "paise", "ka kiraya"]}
+_MONEY = {norm(w) for w in ["rupay", "rupaye", "rupee", "rupees", "rs", "rupya", "paise", "inr"]}
 _STOP = {norm(w) for w in [
     "ko", "ka", "ki", "ke", "wale", "wala", "vale", "vala", "bhai", "ji", "sahab", "bhej", "bhejna",
     "bhejo", "bhejdo", "bhejun", "bhejoon", "bhejdu", "dena", "de", "dijiye", "dijie", "do", "chahiye", "chaiye", "hai", "hain",
@@ -96,7 +96,7 @@ def parse_date(text: str):
     kept = [f for f in found if not (f[0] + f[1] < len(toks) and toks[f[0] + f[1]] in _NOT_WORDS)]
     vague = {i for i in range(len(toks) - 1) if toks[i] in _KAL and toks[i + 1] in _PARSO}
     kept = [f for f in kept if f[0] not in vague and f[0] - 1 not in vague]  # "kal parso" = some day soon
-    kept = [f for f in kept if f[4] not in _NOW or _SEND & set(toks[f[0] + 1:f[0] + 4])]
+    kept = [f for f in kept if f[4] not in _NOW or _SEND & set(toks[max(0, f[0] - 3):f[0] + 4])]
     if not kept:
         return None
     _, _, d, label, heard = max(kept, key=lambda f: f[0])
@@ -153,7 +153,7 @@ def _is_bargain(toks):
 
 def _clean_item(toks):
     return [t for t in toks if t not in _STOP and t not in _DATE_TOKENS and t not in _UNIT_WORDS
-            and t not in _FILLER and t not in _REF and t not in _BARGAIN]
+            and (t not in _FILLER or is_item_word(t)) and t not in _REF and t not in _BARGAIN]
 
 
 def _named_item(toks, party_tokens):
@@ -219,8 +219,10 @@ def _call_talk(item):
     return len(item) > 3 and match_item(" ".join(item))["status"] == "unknown"
 
 
-def extract_rules(text: str):
-    long_call = len(norm(text).split()) > LONG_CALL
+def extract_rules(text: str, call: bool = False):
+    """call=True for an uploaded recording or a pasted call transcript; a long one is
+    full of talk. A spoken or typed order keeps every line and asks about it."""
+    long_call = call and len(norm(text).split()) > LONG_CALL
     party_res, party_phrase = find_party(text)
     party_tokens = set(party_phrase.split()) if party_phrase else set()
     clauses = _SPLIT_RE.split(f" {text} ")
@@ -242,7 +244,7 @@ def extract_rules(text: str):
                 i += 1
                 continue
             q = _read_qty(toks, i)
-            if q and q["end"] < len(toks) and toks[q["end"]] in _MONEY:
+            if q and ((q["end"] < len(toks) and toks[q["end"]] in _MONEY) or (i > 0 and toks[i - 1] in _MONEY)):
                 i = q["end"] + 1  # "dhai sau rupaye": a price, not 250 of something
                 continue
             if q:
@@ -291,7 +293,7 @@ def extract_rules(text: str):
             if item and (_QUESTION_WORDS | _ASKING) & set(toks) and match_item(" ".join(item))["status"] != "ok":
                 continue
             # "saadhe teen sau to vahan se kiraya lagega": fare or price talk about nothing on the list
-            if _is_bargain(toks) and match_item(" ".join(item))["status"] not in ("ok", "choose"):
+            if _is_bargain(toks) and match_item(" ".join(item))["status"] in ("unknown", "missing"):
                 continue
             if long_call and _call_talk(item):
                 continue

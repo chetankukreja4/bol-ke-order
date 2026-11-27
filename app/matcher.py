@@ -19,20 +19,28 @@ LEAD = 8
 MAX_CHOICES = 8  # a "which brand?" question never lists more than this
 
 _ITEM_INDEX = []
+_ITEM_WORDS = set()  # every word in an item name or spoken name
 
 
 @on_items_change
 def rebuild_item_index():
     _ITEM_INDEX[:] = [(norm(a), it["code"]) for it in CATALOG for a in it["aliases"] + [it["name"]] if norm(a)]
+    _ITEM_WORDS.clear()
+    _ITEM_WORDS.update(w for a, _ in _ITEM_INDEX for w in a.split())
     # Staff drop the brand on a list full of it: "elbow 1 inch" for "Astral Elbow 1''",
     # "sumercible dedh hp water" for "Crompton Sumercible 1.5hp Water".
     firsts = {}
     for it in CATALOG:
         w = (norm(it["name"]).split() or [""])[0]
         firsts[w] = firsts.get(w, 0) + 1
-    brands = {w for w, n in firsts.items() if n >= 3 and w.isalpha()}
+    if not any(n >= 3 and w.isalpha() for w, n in firsts.items()):
+        return  # a list without brands (the samples): names stay whole
+    # Every item gets it, not only the big brand: "elbow 1 inch" with Astral and Prince
+    # Elbow 1" on the list is a tie, and the app asks which.
     _ITEM_INDEX.extend((" ".join(a.split()[1:]), code) for a, code in list(_ITEM_INDEX)
-                       if len(a.split()) >= 3 and a.split()[0] in brands)
+                       if len(a.split()) >= 3 and a.split()[0].isalpha())
+    _ITEM_WORDS.clear()
+    _ITEM_WORDS.update(w for a, _ in _ITEM_INDEX for w in a.split())
 
 
 rebuild_item_index()
@@ -234,9 +242,19 @@ def choose_from(text: str, options, kind="item"):
     for idx, words in ordinals.items():
         if idx < len(options) and any(norm(w) in toks for w in words):
             return options[idx]
+    said = _sizes(toks)
+    if kind == "item" and said:  # "1 inch wala" to "Astral Elbow 1\" ya Astral Elbow 2\"?"
+        fits = [o for o in options if said <= _sizes(norm(o["name"]).split())]
+        if len(fits) == 1:
+            return fits[0]
     index = _ITEM_INDEX if kind == "item" else _PARTY_INDEX
     allowed = {o["code"] for o in options}
     ranked = [(c, s) for c, s in _ranked(text, index) if c in allowed]
     if ranked and ranked[0][1] >= 75 and (len(ranked) == 1 or ranked[0][1] - ranked[1][1] >= 5):
         return next(o for o in options if o["code"] == ranked[0][0])
     return None
+
+
+def is_item_word(word):
+    """A word of some item's name ("pas" in "Pass Pass Pulse"): never thrown away as talk."""
+    return word in _ITEM_WORDS

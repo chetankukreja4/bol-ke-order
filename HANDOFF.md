@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `fix/review-pr9`, built on `main` 641a12f). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `fix/voice-sizes`, built on `main` 0f0db8f). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -86,7 +86,7 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/parser.py` | Rule-based extraction, dates, confirm / correction / leave-it words, two-party detection, talk filters, dispatch parsing (party, mode, order numbers, joined numbers) |
 | `app/dialog.py` | Draft order, read-back, next question, answers and corrections, `link_line` (teach), `remove_line`, `draft_from_order` (edit), save checks |
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit`, keyterms: parties then most-ordered items), ffmpeg chunking off the main thread, retries |
-| `app/tts.py` | Local Piper Hindi voice (`hi_IN-pratham-medium`): Hinglish words → Devanagari (names stay English), mp3 via ffmpeg, cache |
+| `app/tts.py` | Local Piper Hindi voice (`hi_IN-pratham-medium`): Hinglish words → Devanagari (names stay English), sizes said the shop way (`spoken_sizes`: 3/4" → पौना इंच, 2x1'' → 2 बाय 1 इंच, 1.5hp → डेढ़ hp, 6kg → 6 किलो), mp3 via ffmpeg, cache |
 | `app/transcript.py` | Cleans a pasted call transcript: removes times, speaker labels, phone numbers |
 | `app/importer.py` | Busy / Excel / CSV import for items and parties (header found under title rows; whole-word customer groups; grouped exports; stable codes; spoken names need 3+ letters) and the blank Excel templates |
 | `app/pilot.py` | Pilot stats in the draft (start time, source, questions, corrections, test order, offline wait), `summary()`, `csv_rows()` |
@@ -95,7 +95,7 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `scripts/get_voice.py` | Downloads the Piper voice into `models/` (git-ignored); the Dockerfile runs it |
 | `static/` | `index.html` (5 tabs), `app.js` (mic engines, voice, pages, teach dialog, offline queue, PIN prompt, imports), `style.css` (Codex look; light + dark). Bump `?v=` on the CSS/JS links when you change them |
 | `.github/workflows/tests.yml` | CI: pytest; then `docker compose up --build` with no keys, `/healthz`, main screen, "key not set", one typed order |
-| `tests/` | 227 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, `test_review_pr9`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
+| `tests/` | 239 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, `test_review_pr9`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -103,7 +103,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 227 tests (CI runs them, then the compose check, on every push)
+pytest -q                          # 239 tests (CI runs them, then the compose check, on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`. Restart a server started without `--reload` after pulling new code: the page loads new JavaScript at once, but old Python keeps running (this caused "still same" on 27 Nov).
@@ -115,13 +115,13 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **227 tests pass** locally (CI runs on the PR).
+- **239 tests pass** locally (CI runs on the PR).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
 - **Browser** (scratch database, phone and desktop, light and dark): every tab, order flow to parchi, edit, cancel, Galat nikla + Undo, WhatsApp link text, Aaj jaana, Busy CSV, offline queue (blocked network, queued, saved once; a passed date shown as "atka hai" and fixed by voice), demo reset, Busy-style imports, Excel template download, teach (Jodo / Naya item, learned for the next order), Hatao.
 - **Owner's real calls**: rate talk / "uski" / agar-nahi toh (fixed), and a pump/motor shop call where talk became lines (fixed; verified on the restarted server).
-- **A real wholesaler's Busy item lists** (231 pipe fittings, 90 pumps; title rows, Sale Price column ignored) imported with nothing skipped, and **two real call recordings** (5.5 and 3 minutes) through Sarvam upload: no party, day, fare or size guessed; sized lines like "elbow sawa inchi tees" became 30 x Astral Elbow 1 1/4". Checked on a scratch DB, not in the browser.
+- **A real wholesaler's Busy item lists** (231 pipe fittings, 90 pumps; title rows, Sale Price column ignored) imported with nothing skipped, and **two real call recordings** (5.5 and 3 minutes) through Sarvam upload: no party, day, fare or size guessed; sized lines like "elbow sawa inchi tees" became 30 x Astral Elbow 1 1/4". Checked on a scratch DB. In the browser (27 Nov, after #10): the pipe list order "10 piece astral elbow 1 inch, 5 astral tee 3/4 inch, 8 astral socket" gave Elbow 1" and Tee 3/4" sure, a size question for the socket, "aadha inch wala" picked Socket 1/2", parchi printed the sizes. The voice's mp3 was sent back through Sarvam: it now says "pauna inch", "aadha inch", "do by ek inch", "dedh h p", "sava ek inch", "chhah kilo" (before: "teen slash chaar", "do x ek", no inch).
 
 Not checked yet:
 - **Deploy and the phone microphone over HTTPS.**
@@ -173,6 +173,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| voice sizes (branch `fix/voice-sizes`) | Found in the browser check: the voice read `3/4"` as "teen slash chaar", `2x1''` as "do x ek", `1.5hp` as "ek dashamlav paanch", and dropped "inch". `tts.spoken_sizes` now says sizes the shop way (पौना / आधा / डेढ़ / सवा / ढाई / साढ़े, बाय, इंच, किलो, डिग्री for 45*); the quotes round heard words in "Pakka nahi hoon. '...' matlab" are not inch marks. Checked by sending the voice's mp3 back through Sarvam. 239 tests |
 | review fixes (branch `fix/review-pr9`) | From the code review of PR #9: a brand-less name now goes to every item on a branded list, so Astral and Prince Elbow 1" tie and the app asks; "1 inch wala" answers a size question; the long-call talk filter runs only on uploads and pasted calls, so a long spoken order keeps "20 bori" and asks; a quoted number (`lux "10" carton`) is not inches; talk words that are in an item name stay ("Pass Pass", "Bat"); money words drop a line only if it names nothing on the list; "das kilo wala" stays 10 kg (a class only when a quantity follows); "90m" stays metres ("mm" marked before de-doubling); "rs 250" is a price; "bhej do abhi" is today. 227 tests |
 | real calls, pipes (branch `fix/real-call-pipes`) | From a real wholesaler's Busy lists and two call recordings: sizes are part of the name, never a quantity ("10 elbow 1 inch" was 2 lines, "3/4" was 3 and 4); size-aware matching, brand may be dropped, model numbers ("mini champ 1"); questions say the size; "ji sahab" no longer picks Jain Sahab; "rupaye" after a number and fare talk are not lines; "bundle" unit; "kal parson" and "abhi" in talk are not a delivery day; long calls drop item-less and sentence lines; an item said as "nahi hain" is not a line. Also fixed: clauses never split at "aur" (a backspace character was in the regex). 207 tests |
 | docs (branch `docs-update`) | README rewritten for main; HANDOFF sections 1-10 brought up to date (pages, rules, code map, checks, shop-day checklist, demo and deck notes); DEPLOY host notes and checks updated |

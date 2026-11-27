@@ -71,6 +71,8 @@ def _names():
 def to_speech_text(text: str) -> str:
     """'Sahi hai? Haan pakka bolein.' -> 'सही है? हाँ पक्का बोलें।'"""
     text = clean(text)
+    # "Pakka nahi hoon. 'mini champ 1' matlab ...": quotes round what was heard, not inch marks
+    text = re.sub(r"(?<!\w)'([a-z][^']*)'(?=\s+matlab\b)", r"\1", text)
     kept = []
 
     def hold(m):
@@ -82,7 +84,48 @@ def to_speech_text(text: str) -> str:
         text = re.sub(r"\b(?:" + "|".join(re.escape(n) for n in names) + r")\b", hold, text, flags=re.I)
     text = _WORD.sub(lambda m: HINGLISH.get(m.group(0).lower(), m.group(0)), text)
     text = re.sub(r"\x00(\d+)\x00", lambda m: kept[int(m.group(1))], text)
+    text = spoken_sizes(text)
     return re.sub(r"(?<!\d)\.(?!\d)", "।", text)  # a full stop, not a decimal point
+
+
+# Sizes in item names, the way a shop says them: 'Elbow 3/4"' -> "पौना इंच",
+# "Bush 2x1''" -> "2 बाय 1 इंच", "1.5hp" -> "डेढ़ hp". Without this the voice says
+# "teen slash chaar", "do x ek", "ek dashamlav paanch", and drops the inch.
+_INCH_MARK = r"(?:''|\"|”|″|’’|'|’)"
+
+
+def _say_number(v):
+    whole, part = int(v), round(v - int(v), 2)
+    if part == 0:
+        return str(whole)
+    if whole == 0:
+        return {0.25: "पाव", 0.5: "आधा", 0.75: "पौना"}.get(part)
+    if part == 0.5:
+        return {1: "डेढ़", 2: "ढाई"}.get(whole, f"साढ़े {whole}")
+    if part == 0.25:
+        return f"सवा {whole}"
+    if part == 0.75:
+        return f"पौने {whole + 1}"
+    return None
+
+
+def _say(m, v):
+    return _say_number(v) or m.group(0)
+
+
+def spoken_sizes(text):
+    if not re.search(r"\d", text):
+        return text
+    t = re.sub(r"(\d)\s*[*×xX]\s*(?=\d)", r"\1 बाय ", text)  # 2x1, 1*1/2
+    t = re.sub(r"(\d)\*", r"\1 डिग्री", t)  # "Elbow 1'' 45*": the bend angle
+    t = re.sub(r"(?<![\d.])(\d)\s+(\d{1,2})\s*/\s*(2|4|8)(?![\d/])",  # 1 1/2
+               lambda m: _say(m, int(m[1]) + int(m[2]) / int(m[3])), t)
+    t = re.sub(r"(?<![\d./])(\d{1,2})\s*/\s*(2|4|8)(?![\d/])",  # 3/4
+               lambda m: _say(m, int(m[1]) / int(m[2])) if int(m[1]) < int(m[2]) else m[0], t)
+    t = re.sub(r"(?<![\d.])(\d+)\.(25|5|75)(?![\d.])", lambda m: _say(m, float(m[0])), t)  # 1.5, 1.25
+    t = re.sub(r"(?<=[\dऀ-ॿ])\s*" + _INCH_MARK, " इंच", t)
+    t = re.sub(r"(?<=[\dऀ-ॿ])\s*kgs?\b", " किलो", t, flags=re.I)  # "6kg ISI" was "chhah k g"
+    return re.sub(r"([ऀ-ॿ])(?=[A-Za-z])", r"\1 ", t)  # "डेढ़hp" -> "डेढ़ hp"
 
 
 def available() -> bool:

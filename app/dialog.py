@@ -219,6 +219,10 @@ def answer(d, text: str):
             return d, "confirm"
         d["say"] = f"Pehle ye batayein: {d['question']['text']}"
         return d, "repeat"
+    if is_correction(text) and parse_date(text) and not quantities_in(" ".join(norm(text).split()[1:])):
+        d["delivery"] = parse_date(text)  # "nahi, parso": only the day changes
+        _count(d, "corrections")
+        return finish(d), "updated"
     if is_correction(text):
         d, ok = _apply_correction(d, text)
         if ok:
@@ -277,7 +281,8 @@ def answer(d, text: str):
         if extra["lines"]:
             d["lines"].extend(make_line(r) for r in extra["lines"])
             handled = True
-        if extra["delivery"] and not d["delivery"]:
+        past = bool(d["delivery"]) and str(d["delivery"].get("date", "")) < today().isoformat()
+        if extra["delivery"] and (not d["delivery"] or past):  # a passed date (order waited offline) can be said again
             d["delivery"], handled = extra["delivery"], True
     if handled:
         _count(d, "questions")  # every answer that changed the order
@@ -286,6 +291,30 @@ def answer(d, text: str):
         d["say"] = f"Samjha nahi. {d['question']['text'] if d['question'] else 'Haan pakka bolein.'}"
         return d, "repeat"
     return finish(d), "updated"
+
+
+def draft_from_order(o):
+    """A saved order back as a draft, to correct by voice ("nahi, aath carton",
+    "aur 2 bori cheeni") and save again under the same number."""
+    from datetime import date
+    lines = []
+    for ln in o["lines"]:
+        known = ln["code"] in ITEMS_BY_CODE
+        m = None if known else match_item(ln["name"])
+        lines.append(_refresh_line({
+            "id": uuid.uuid4().hex[:8], "heard": "", "item_text": ln["name"],
+            "match": "ok" if known else m["status"], "item": item_option(ln["code"]) if known else m["item"],
+            "options": [] if known else m["options"], "group": ITEMS_BY_CODE[ln["code"]].get("group") if known else m["group"],
+            "qty": ln["qty"], "qty_alts": [], "unit": ln["unit"], "heard_unit": True, "note": None}))
+    party_ok = o["party_code"] in PARTIES_BY_CODE
+    when = date.fromisoformat(o["delivery_date"])
+    label = {0: "aaj", 1: "kal", 2: "parso"}.get((when - today()).days, o["delivery_date"])
+    d = {"heard": o.get("heard_text") or "", "lines": lines, "notice": None, "warning": None,
+         "party": {"status": "ok", "party": party_option(o["party_code"]), "options": []} if party_ok
+         else {"status": "missing", "party": None, "options": []},
+         "delivery": {"date": o["delivery_date"], "label": label, "heard": ""},
+         "edit_of": o["id"], "draft_id": uuid.uuid4().hex}
+    return finish(d)
 
 
 def validate_for_save(d):
@@ -316,6 +345,9 @@ def validate_for_save(d):
         when = date.fromisoformat(str(d["delivery"].get("date")))
     except (TypeError, ValueError):
         return "Delivery date not valid"
-    if not -1 <= (when - today()).days <= 60:
-        return "Delivery date too far"
+    days = (when - today()).days
+    if days > 60:
+        return "Delivery date bahut aage hai (60 din tak)"
+    if days < -1 and d.get("edit_of") is None:  # a late order being edited keeps its date
+        return "Delivery date pichhli hai. Nayi date bolein (aaj, kal, parso)"
     return None

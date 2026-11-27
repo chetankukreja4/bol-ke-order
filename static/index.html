@@ -15,7 +15,7 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=15">
+<link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
 <header class="top no-print">
@@ -145,9 +145,14 @@
     <section class="card no-print">
       <h3>Next</h3>
       <div class="stack">
+        <button id="dnWa" class="btn btn-outline full">💬 WhatsApp par bhejo</button>
         <button id="dnPrint" class="btn btn-outline full">🖨 Print parchi</button>
         <a id="dnCsv" class="btn btn-outline full" href="#">⬇ CSV for billing</a>
         <button id="dnNew" class="btn full">+ New order</button>
+        <div class="split">
+          <button id="dnEdit" class="btn btn-outline">✎ Edit order</button>
+          <button id="dnCancel" class="btn btn-danger">✗ Cancel order</button>
+        </div>
       </div>
       <p id="dnHeard" class="heard-note"></p>
       <div id="dnWrong" class="wrong"></div>
@@ -159,11 +164,15 @@
 <section id="screen-orders" class="screen" data-tab="orders">
   <div class="page-h">
     <div><h2>Orders</h2><p class="page-lead">Open a saved order to see or print its parchi.</p></div>
-    <a class="btn btn-outline" href="/api/orders.csv">⬇ CSV review sheet</a>
+    <div class="head-actions">
+      <a class="btn" href="/api/orders.csv?day=today">⬇ Aaj ki Busy CSV</a>
+      <a class="btn btn-outline" href="/api/orders.csv">⬇ Review sheet</a>
+    </div>
   </div>
   <section class="card">
     <div class="seg" id="ordFilter" role="tablist">
       <button data-f="all" class="on">All</button>
+      <button data-f="today">Aaj jaana</button>
       <button data-f="confirmed">Pending</button>
       <button data-f="dispatched">Dispatched</button>
     </div>
@@ -241,6 +250,11 @@
       <p class="fine">Deck mein app ke time ke saath Busy mein CSV daalne ka time bhi jodein, taaki dono ek jaisa naapein.</p>
     </section>
   </div>
+  <section id="demoCard" class="card hidden">
+    <h3>Demo reset</h3>
+    <p class="sub">Video se pehle saare orders hata kar sample items aur parties wapas laata hai. Asli shop data ke saath kabhi na chalayein. Pakka karne ke liye RESET likhein.</p>
+    <div class="row"><input id="demoConfirm" placeholder="RESET" autocomplete="off"><button id="demoReset" class="btn btn-danger">Reset</button></div>
+  </section>
 </section>
 
 <footer class="foot no-print"><span>Bol-ke-Order · Scaler Round 2 prototype</span><span>Speak. Check. Confirm.</span></footer>
@@ -266,6 +280,6 @@
 </dialog>
 
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/app.js?v=14"></script>
+<script src="/static/app.js?v=16"></script>
 </body>
 </html>

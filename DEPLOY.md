@@ -23,6 +23,7 @@ The app is one Docker container. Any cloud that can build a Dockerfile from a Gi
 | `PORT` | Set by most hosts | Port to listen on. Default `8000`. |
 | `DB_PATH` | Optional | Default `/data/orders.db`. |
 | `BKO_VOICE_MODEL` | Set by the Dockerfile | Path of the local Hindi voice (Piper). The Docker build downloads it (~64 MB) with `scripts/get_voice.py`. Without it the browser's own voice is used. |
+| `BKO_DEMO` | Only for a demo copy | `1` shows Demo reset on the Pilot tab (deletes every order). Never set it on the shop's real app. |
 | `BKO_PIN` | Recommended on a public URL | A shop PIN. When set, the app asks for it once on each phone. Without it anyone with the link can see orders. |
 
 Put keys in the host's "secrets" or "environment" screen. Never put them in the repo.

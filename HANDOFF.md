@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (after commit `9c9f9c4`, branch `pilot-ready`). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `improvements`, CI green on PRs #1, #2, #3; stacked PRs #1 `pilot-ready` → #2 `codex-look` → #3 `improvements`). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -19,7 +19,6 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 
 | What | Where |
 |---|---|
-| CI (all branches) | `.github/workflows/tests.yml`: every push and PR runs `pytest` and builds the Docker image, starts it with no keys and checks `/healthz` |
 | Code | https://github.com/chetankukreja4/bol-ke-order (public, branch `main`) |
 | Local copy | `E:\scaler\bol-ke-order` |
 | Live URL | Not deployed yet. Plan: Dostack Cloud (see `DEPLOY.md`). |
@@ -34,7 +33,7 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 | 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. |
 | 4. Live link (optional bonus) | **To do.** Deploy on Dostack Cloud. |
 
-Before submitting: ask a friend to clone the repo and run `docker compose up --build` on their machine (the organisers' tip). It has not been run in Docker yet (section 7).
+The Docker image is built and started with no keys on every push and PR by GitHub Actions (`tests` workflow), and `/healthz` answers (all three PRs green on 27 Nov). A friend running `docker compose up --build` on their own machine is still a good last check (the organisers' tip).
 
 ## 4. How it works
 
@@ -88,7 +87,7 @@ Pages (tabs, `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `app/samples.py` | 10 Hinglish test phrases with expected results |
 | `static/` | `index.html` (5 tabs: Order, Orders, Dispatch, Items, Pilot), `app.js` (mic engines, TTS, pages, dispatch talk, item add/edit/remove), `style.css` (look taken from the Codex prototype `bol-ke-order-scaler-round-2`: green ink, lime accent, white cards, pill page nav at the top; light + dark). Bump the `?v=` number on the CSS/JS links in `index.html` when you change them, so phones don't keep old files |
 | `tests/test_orders.py` | 44 tests (they never read `.env`: `BKO_NO_DOTENV=1`) |
-| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py` | 18 + 10 + 44 tests: Busy imports, which-party questions, pilot numbers, and one test per bug from the 27 Nov full check. 116 tests in all |
+| `tests/test_import.py`, `tests/test_pilot.py`, `tests/test_bugfixes.py`, `tests/test_tts.py`, `tests/test_improvements.py`, `tests/test_review_fixes.py` | Busy imports, which-party questions, pilot numbers, one test per bug from the 27 Nov full check, the local voice, edit/cancel and the other improvements, and the code-review fixes. 145 tests in all |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -96,7 +95,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 116 tests (inside .venv or the container)
+pytest -q                          # 145 tests (inside .venv or the container; CI runs them on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`
@@ -108,7 +107,8 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- 116 tests pass (44 bug tests on branch `codex-look`, 28 on `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
+- **Docker build** (GitHub Actions, 27 Nov, PRs #1, #2, #3): the image builds (on `codex-look` and `improvements` it also downloads the voice model), starts with no keys, and `/healthz` answers. Docker is still not installed on the dev PC. Memory use on a 512 MB host is not measured.
+- 145 tests pass (on `improvements`: 9+1 review-fix and 8 improvement tests, 11 voice tests, 44 bug tests on `codex-look`, 28 on `pilot-ready` for imports and pilot numbers; plus rate talk + "uski" + agar/nahi toh call from the owner's screenshot, numbers, Devanagari, all 10 phrases, small talk, two quantities, unknown items, similar parties, corrections, nothing saved before confirm, API flow, CSV, items add/edit/remove, pasted transcripts in 4 formats, dispatch context, Hindi "haan pakka", order numbers, several orders, joined numbers, "key not set").
 - Sarvam with the real key: called and working (about 0.7 s for a 10 s clip). Tested with a Windows text-to-speech sample, not a real person yet.
 - In the browser at phone and desktop size: all four tabs, items add/edit/remove, order flow to parchi, old parchi view, paste transcript, dispatch talk (with the last dispatch step stubbed so real orders were not changed). Light and dark themes.
 - The owner tried the live mic on a laptop: orders and dispatch work; the screenshots led to the dispatch fixes above.
@@ -116,7 +116,6 @@ Checked:
 - The server start command and health check work.
 
 Not checked yet:
-- **Docker build**: Docker is not installed on the dev PC (checked again 27 Nov on branch `pilot-ready`). The Dockerfile is simple and installs `requirements.txt` (now with `openpyxl`), but run it once before submitting.
 - **A real Busy export**: the importer was tested with Busy-style files we made (title rows, Name/Alias/Group/Main Unit, Sundry Debtors). Import the shop's real file once and look at the preview before saying yes.
 - **Phone microphone over HTTPS**: needs a deploy. The header pill "Mic: Sarvam AI ⇄" switches between Sarvam and the browser recogniser; the browser one writes Devanagari and mishears numbers and "truck" more often.
 - **A real Samsung call transcript**: the four formats tested were written by us. Paste one real copy to check.
@@ -134,7 +133,7 @@ Not checked yet:
   6. End of day: Pilot tab → "CSV" for the video and the deck.
 - **Next (approved 27 Nov, branch `pilot-ready`):** shop-ready + pilot numbers before 30 Nov. Busy export import for items and parties, parties moved to SQLite, numbers saved with every order (time to confirm, questions, corrections, "Galat nikla"), a Pilot tab with CSV, then deploy and test in the shop. Design: `docs/superpowers/specs/2026-11-27-pilot-ready-design.md`. Why: the Round 2 masterclass (VC speaker) stressed real-user testing in person and before/after numbers; no rubric was published.
 - Items are managed on the Items page (add, edit, remove; saved in SQLite). Parties are now in SQLite (seeded from the 7 samples) and both lists can be replaced from a Busy export.
-- Orders cannot be deleted from the app (test orders stay in `data/orders.db`; delete that file to start clean locally).
+- Orders can be cancelled or edited until they are dispatched, not deleted. For a clean demo, run with `BKO_DEMO=1` and use Demo reset on the Pilot tab.
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it (e.g. Firefox) fall back to recording + server STT, which needs the Sarvam key.
 - On Android Chrome the live mic does not also keep a recording (the mic can't be shared), so "retry with the same recording" only works for uploads and desktop.
 - No login, one shop only, no dues or payments module (kept out on purpose).
@@ -167,6 +166,10 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| Docker checked (branch `improvements`) | HANDOFF: the Docker build passes in CI; the CI row moved from section 2 to this change log |
+| CI (all branches) | `.github/workflows/tests.yml`: every push and PR runs `pytest` and builds the Docker image, starts it with no keys and checks `/healthz` |
+| review fixes 2 (branch `improvements`) | From the code review of the whole branch: an order that waited offline is never dropped (a refused one shows "order atka hai" and opens to fix), and the wait is not counted as order time (`offline_seconds`); Busy sub-groups like "Wholesale Parties" stay customers (whole-word group check); grouped exports read sub-group heading rows; PIN login allows 5 wrong tries per 10 minutes per address and never 500s on odd characters; late pending orders can be edited, and a new order with a past date says "pichhli hai"; the day can be changed by voice ("nahi, parso", or just "kal" when the date has passed); cancelled orders say "cancel ho chuka hai" in dispatch; item and party names keep their English reading in the voice. 145 tests; offline flow checked in the browser |
+| improvements (branch `improvements`) | Edit a saved order (it comes back to Check the order; voice or taps change it; same number, `edited_at`) and Cancel it (status `cancelled`, left out of pending, dispatch and pilot numbers); "Aaj jaana" filter (pending, due today or late); "Aaj ki Busy CSV" (`/api/orders.csv?day=today`, every order of the day, no limit); parchi on WhatsApp (wa.me link, the shop picks the contact); an order confirmed with no network waits on the phone and is saved when it is back (draft id stops duplicates); Sarvam keyterms put the most-ordered items first; Demo reset on the Pilot tab, only with `BKO_DEMO=1` and RESET typed. Already done earlier: shop PIN, open-order count in dispatch, Practice order layout. Checked in the browser on a scratch DB. Not pushed |
 | local voice (branch `codex-look`) | The app speaks with a local Piper Hindi voice (hi_IN pratham, chosen by the owner): `app/tts.py`, `POST /api/speak`, Hinglish words turned into Devanagari, names stay English. Free, no key; ~0.1 s per line after the first. `python scripts/get_voice.py` downloads the model (64 MB, git-ignored in `models/`); the Dockerfile does it at build. Without it the browser voice is used. Checked in the browser: a full order (read-back, brand answer, confirm, saved) spoke 4 lines from `/api/speak`, all played, no fallback, no console errors. How it sounds was judged by the owner from samples. Not pushed |
 | bug fixes (branch `codex-look`) | From the 27 Nov full check: "pakka nahi" / "save mat karo" / "sahi hai kya" never save; one draft saves one order (double tap, network retry); "rehne do" changes nothing; dozen and gram are units; the day said last wins and "kal nahi" is dropped; two parties in one call ask; a party with two open orders asks which in dispatch; "Waiting to go" taps ask "Pakka?"; the Orders list keeps every pending order; an item said without a quantity asks "kitna?"; save takes names from the lists and checks unit, date (up to 60 days) and quantity (max 9999); "10 se 12" asks which; re-dispatch refused, mode checked; "Galat nikla" has Undo; a spoken name used by another item is refused; grouped Busy exports skip headings and bank rows; ffmpeg no longer blocks the server; optional `BKO_PIN`. Checked in the browser on a scratch DB. Not pushed |
 | Codex layout (branch `codex-look`) | Pages rebuilt in the Codex structure: heading row (title left, action right), content in white cards, equal two-column cards (Order: voice / paste; Dispatch: voice / waiting list; Done: parchi / next steps; Pilot: details / baseline), 3x2 pilot tiles, text-only page nav, footer. Paste box shows first; "Type the order instead" swaps it (same JS). Order lines show the name left and quantity right. Not pushed |

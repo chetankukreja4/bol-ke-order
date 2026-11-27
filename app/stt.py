@@ -31,7 +31,14 @@ def _keyterms():
     """Shop words that bias recognition (Sarvam allows 50 terms of up to 64 chars)."""
     # Party names first (hardest words for speech-to-text, and a big Busy item
     # list would otherwise push them all out), then items to fill the 50.
-    terms = [p["name"] for p in PARTIES[:20]] + [it["name"] for it in CATALOG]
+    # Items the shop orders most come first, from its own saved orders.
+    from .catalog import ITEMS_BY_CODE
+    from .db import top_item_codes
+    try:
+        top = [ITEMS_BY_CODE[c]["name"] for c in top_item_codes() if c in ITEMS_BY_CODE]
+    except Exception:  # the keyterms are a hint; never fail a transcription over them
+        top = []
+    terms = [p["name"] for p in PARTIES[:20]] + top + [it["name"] for it in CATALOG]
     # Only names. Unit words like "katta"/"bori" made Sarvam hear "carton" as "katta".
     seen, out = set(), []
     for t in terms:

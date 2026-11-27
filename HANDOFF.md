@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `docs-update-2`, built on `main` 7dab070). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `docs-update-3`, built on `main` 95b9aab). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -27,11 +27,13 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 
 ## 3. Hackathon submission (deadline 30 Nov 2026, 11:59 pm, one submission per team)
 
+The Round 2 brief (Scaler × Wispr Flow message): "build a working prototype for the theme ... A prototype, not a full product", in a repo "with your own Docker Compose file". Submit by 30 Nov, 11:59 pm: **a public repo, a YouTube video walkthrough and an idea deck; a deployed link is optional.** Prizes: ₹30L across 15 winning teams, interviews at Wispr, 500 finale spots.
+
 | Item | Status |
 |---|---|
 | 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 5,100 lines of app code (3,400 Python + 1,700 web) + 1,750 lines of tests. Starts with no keys; a missing key shows "key not set". CI checks this on every push. |
-| 2. YouTube demo, 3 minutes or less | **To do.** Plan in section 9. Record it from the real shop test. |
-| 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. Use the Pilot tab numbers. |
+| 2. YouTube video walkthrough, 3 minutes or less | **To do.** Plan in section 9. Record it from the real shop test. |
+| 3. Idea deck (we plan a PDF: problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. Use the Pilot tab numbers. |
 | 4. Live link (optional bonus) | **To do.** Also needed for the phone mic (HTTPS). See `DEPLOY.md`. |
 
 Plan agreed on 27 Nov: feature freeze; only fix what the real shop test shows. Day 1 deploy + import the shop's lists + practice run; day 2 real orders in the shop (record the video, download the Pilot CSV); day 3 fixes, deck, video; submit on the 30th well before 11:59 pm.
@@ -117,7 +119,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **239 tests pass** locally and in CI (pytest + compose on every PR; #9, #10 and #11 all green before merging).
+- **239 tests pass** locally and in CI (pytest + compose on every PR; #9 to #12 all green before merging, and the `main` runs after each merge passed too).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
@@ -170,13 +172,14 @@ Not checked yet:
 ## 11. Accounts
 
 - GitHub: `chetankukreja4` (repo owner).
-- Hosting: Dostack Cloud (to be set up by Chetan). Keys go only in the host's secret settings.
+- Hosting: not chosen yet (see section 2 and `DEPLOY.md`; to be set up by Chetan). Keys go only in the host's secret settings.
 
 ## 12. Change log (newest first)
 
 | Commit | What changed |
 |---|---|
-| docs (branch `docs-update-2`) | HANDOFF, README and DEPLOY brought up to date with `main` 7dab070 after #9-#11: day-1 progress, line counts, CI state, "an import replaces the whole list" (export all items in one file), missing brands, the "heard" line, the size question in the demo plan |
+| docs (branch `docs-update-3`) | Section 3 now quotes the Round 2 brief (public repo, YouTube walkthrough, idea deck; deployed link optional); CI note covers #12 and its `main` run; section 11 no longer says Dostack (host not chosen) |
+| 95b9aab (#12, branch `docs-update-2`) | HANDOFF, README and DEPLOY brought up to date with `main` 7dab070 after #9-#11: day-1 progress, line counts, CI state, "an import replaces the whole list" (export all items in one file), missing brands, the "heard" line, the size question in the demo plan |
 | voice sizes (branch `fix/voice-sizes`) | Found in the browser check: the voice read `3/4"` as "teen slash chaar", `2x1''` as "do x ek", `1.5hp` as "ek dashamlav paanch", and dropped "inch". `tts.spoken_sizes` now says sizes the shop way (पौना / आधा / डेढ़ / सवा / ढाई / साढ़े, बाय, इंच, किलो, डिग्री for 45*); the quotes round heard words in "Pakka nahi hoon. '...' matlab" are not inch marks. Checked by sending the voice's mp3 back through Sarvam. 239 tests |
 | review fixes (branch `fix/review-pr9`) | From the code review of PR #9: a brand-less name now goes to every item on a branded list, so Astral and Prince Elbow 1" tie and the app asks; "1 inch wala" answers a size question; the long-call talk filter runs only on uploads and pasted calls, so a long spoken order keeps "20 bori" and asks; a quoted number (`lux "10" carton`) is not inches; talk words that are in an item name stay ("Pass Pass", "Bat"); money words drop a line only if it names nothing on the list; "das kilo wala" stays 10 kg (a class only when a quantity follows); "90m" stays metres ("mm" marked before de-doubling); "rs 250" is a price; "bhej do abhi" is today. 227 tests |
 | real calls, pipes (branch `fix/real-call-pipes`) | From a real wholesaler's Busy lists and two call recordings: sizes are part of the name, never a quantity ("10 elbow 1 inch" was 2 lines, "3/4" was 3 and 4); size-aware matching, brand may be dropped, model numbers ("mini champ 1"); questions say the size; "ji sahab" no longer picks Jain Sahab; "rupaye" after a number and fare talk are not lines; "bundle" unit; "kal parson" and "abhi" in talk are not a delivery day; long calls drop item-less and sentence lines; an item said as "nahi hain" is not a line. Also fixed: clauses never split at "aur" (a backspace character was in the regex). 207 tests |

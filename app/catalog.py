@@ -104,6 +104,7 @@ UNITS = {
     "litre": ["litre", "liter", "ltr", "ltrs", "litres"],
     "dozen": ["dozen", "darjan", "dajan", "dazan", "dz", "dzn", "doz"],
     "gram": ["gram", "grams", "gm", "gms"],
+    "bundle": ["bundle", "bundles", "bandal", "bundal", "bandle"],
 }
 
 DISPATCH_MODES = {

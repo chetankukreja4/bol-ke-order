@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `docs-update`, built on `main` 2cdbba7). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `fix/real-call-pipes`, built on `main` 41e3e84). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -60,7 +60,9 @@ Main rules:
 - Never guesses: "sabun" asks the brand; weak matches show top 3; "10 ya 12" / "10 se 12" ask; "Sharma ji" asks which Sharma; two parties in one call ask which; a party with two open orders asks which in dispatch. Uncertain lines are yellow with "Pakka nahi hoon." Only staff link a line to an item.
 - "nahi, aath carton" changes only that line; "nahi, parso" only the day; "rehne do" changes nothing. "Pakka nahi", "save mat karo", "sahi hai kya" never save.
 - Real calls mix rate talk, conditions and chat. A clause with a quantity is kept even if it says "rate"; a pure rate question is not a line but the item it names is remembered, so "uski bees peti" uses it. "agar ... toh das, nahi toh paanch" becomes one line with two quantities. A generic word with no quantity ("dal rahe ho" is the verb) and a question about something not on the list ("advertisement kitna pada hoga") are talk, not lines.
-- The day said last wins ("aaj order, kal bhejna" = kal); a day followed by "nahi" is dropped.
+- The day said last wins ("aaj order, kal bhejna" = kal); a day followed by "nahi" is dropped. "kal parson" together means "some day soon" and is not a day; "abhi" counts only next to a send word ("abhi bhej do"), not in "abhi yahan rakha hai".
+- Sizes are part of the item name, never a quantity: `textnorm.glue_sizes` turns "1 inch", `3/4"`, `1 1/2''`, "sawa inchi", "chaar by teen", "40mm", "1 hp", and a pipe class after a size ("3 inch 6 kg", "saadhe das kilo ke") into one token ("1inch", "0.75inch", "1.5inch", "1.25inch", "4x3", "40mm", "1hp", "6kg"), the same way for the Busy names and for what staff say. The matcher scores letters and sizes apart, so "elbow 1 inch" is never Elbow 2"; staff may drop the brand on a list full of it ("end cap 1 inch" = Astral End Cap 1''); a model number ends a name ("mini champ 1"). Questions say the size (`Astral Elbow 1"` or `Astral Elbow 2"`).
+- Politeness is not a party ("ji sahab" is not Jain Sahab: the name word itself must be close). A number followed by "rupaye" is a price; fare talk ("kiraya") about nothing on the list is not a line. "bundle" is a unit. In a long call (40+ words), a line with no item, only a vehicle, or a whole sentence that matches nothing is talk; short new names ("pachas motor") stay for "Naya item banao".
 - Unclear audio → "Awaaz saaf nahi aayi, dobara bolein"; recording kept. 8 s silence → one gentle prompt. Network errors → retry; recording kept. No network at Confirm → the order waits on the phone and is saved later (never dropped; a refused one shows "order atka hai" to fix).
 - Prices and discounts are never changed or stored.
 - Nothing is saved until confirm; the server checks again before saving (names come from the lists, unit known, date real and near, quantity up to 9999) and saves one draft only once.
@@ -78,9 +80,9 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | File | What it does |
 |---|---|
 | `app/main.py` | FastAPI routes: `/api/config`, `/api/login` (PIN), `/api/transcribe`, `/api/parse`, `/api/answer`, `/api/teach`, `/api/line/remove`, `/api/orders` (save, list, `/draft` for edit, `/cancel`, `/wrong`, `/dispatch`, CSVs incl. `?day=today`), `/api/dispatch/parse`, `/api/items` and `/api/parties` (list, add, edit, remove, `/import`, `/template.xlsx`), `/api/pilot` (+ CSV, baseline), `/api/demo/reset`, `/api/speak`, `/healthz`, the static page, and the optional PIN middleware |
-| `app/textnorm.py` | Devanagari → Roman, spelling clean-up, spoken numbers (das, dus, ten, pachees, do sau, दस) |
-| `app/catalog.py` | 20 sample items and 7 sample parties (seeds), units (incl. dozen, gram), dispatch modes, live lists with `replace_items()` / `replace_parties()`, which-party words worked out from the list |
-| `app/matcher.py` | RapidFuzz item and party matching, brand groups, lead checks, picking an option from an answer |
+| `app/textnorm.py` | Devanagari → Roman, spelling clean-up, spoken numbers (das, dus, ten, pachees, do sau, दस), sizes as one token (`glue_sizes`, `is_size`) |
+| `app/catalog.py` | 20 sample items and 7 sample parties (seeds), units (incl. dozen, gram, bundle), dispatch modes, live lists with `replace_items()` / `replace_parties()`, which-party words worked out from the list |
+| `app/matcher.py` | RapidFuzz item and party matching (sizes scored apart from letters; names without a brand that 3+ items share; party name word must be close), brand groups, lead checks, picking an option from an answer |
 | `app/parser.py` | Rule-based extraction, dates, confirm / correction / leave-it words, two-party detection, talk filters, dispatch parsing (party, mode, order numbers, joined numbers) |
 | `app/dialog.py` | Draft order, read-back, next question, answers and corrections, `link_line` (teach), `remove_line`, `draft_from_order` (edit), save checks |
 | `app/stt.py` | Sarvam speech-to-text (`saaras:v4`, `translit`, keyterms: parties then most-ordered items), ffmpeg chunking off the main thread, retries |
@@ -93,7 +95,7 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `scripts/get_voice.py` | Downloads the Piper voice into `models/` (git-ignored); the Dockerfile runs it |
 | `static/` | `index.html` (5 tabs), `app.js` (mic engines, voice, pages, teach dialog, offline queue, PIN prompt, imports), `style.css` (Codex look; light + dark). Bump `?v=` on the CSS/JS links when you change them |
 | `.github/workflows/tests.yml` | CI: pytest; then `docker compose up --build` with no keys, `/healthz`, main screen, "key not set", one typed order |
-| `tests/` | 163 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`). They never read `.env` (`BKO_NO_DOTENV=1`) |
+| `tests/` | 207 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -101,7 +103,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 163 tests (CI runs them, then the compose check, on every push)
+pytest -q                          # 207 tests (CI runs them, then the compose check, on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`. Restart a server started without `--reload` after pulling new code: the page loads new JavaScript at once, but old Python keeps running (this caused "still same" on 27 Nov).
@@ -113,17 +115,18 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **163 tests pass** locally and in CI.
+- **207 tests pass** locally (CI runs on the PR).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
 - **Browser** (scratch database, phone and desktop, light and dark): every tab, order flow to parchi, edit, cancel, Galat nikla + Undo, WhatsApp link text, Aaj jaana, Busy CSV, offline queue (blocked network, queued, saved once; a passed date shown as "atka hai" and fixed by voice), demo reset, Busy-style imports, Excel template download, teach (Jodo / Naya item, learned for the next order), Hatao.
 - **Owner's real calls**: rate talk / "uski" / agar-nahi toh (fixed), and a pump/motor shop call where talk became lines (fixed; verified on the restarted server).
+- **A real wholesaler's Busy item lists** (231 pipe fittings, 90 pumps; title rows, Sale Price column ignored) imported with nothing skipped, and **two real call recordings** (5.5 and 3 minutes) through Sarvam upload: no party, day, fare or size guessed; sized lines like "elbow sawa inchi tees" became 30 x Astral Elbow 1 1/4". Checked on a scratch DB, not in the browser.
 
 Not checked yet:
 - **Deploy and the phone microphone over HTTPS.**
-- **The shop's real Busy export** (importer tested with Busy-style files we made). Look at the preview before saying yes.
-- **A real Samsung call transcript** copied from a phone, and a real call recording through Sarvam upload.
+- **The shop's party list from Busy** (items checked; parties tested with Busy-style files we made). Look at the preview before saying yes.
+- **A real Samsung call transcript** copied from a phone.
 - **WhatsApp link on a real phone.**
 - Real shop noise and accents; staff using it for a full day.
 
@@ -140,6 +143,7 @@ Not checked yet:
 - On Android Chrome the live mic does not also keep a recording, so "retry with the same recording" only works for uploads and desktop.
 - One shop only; no accounts beyond the optional PIN; no dues or payments (kept out on purpose).
 - Busy integration is CSV only. Bill photo / PDF import was dropped (it would need OCR or an LLM).
+- A brand that is not in the item list (the "Prakash" and "Aeromax" pipes in the real calls) stays a yellow line: add it to Busy or with "Naya item banao". A call still gives some yellow lines that are talk ("ek box", "chalis guna"); staff "Hatao" them.
 - A Piper voice reads names in English; Hinglish words the app says are mapped to Devanagari by a fixed word list in `app/tts.py` (add new words there).
 - Cost: Sarvam speech-to-text per minute is the only per-order cost; the voice is local and free. Measure the cost per order in the pilot; the shop owner said he would pay about ₹2,000 a year.
 
@@ -169,6 +173,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| real calls, pipes (branch `fix/real-call-pipes`) | From a real wholesaler's Busy lists and two call recordings: sizes are part of the name, never a quantity ("10 elbow 1 inch" was 2 lines, "3/4" was 3 and 4); size-aware matching, brand may be dropped, model numbers ("mini champ 1"); questions say the size; "ji sahab" no longer picks Jain Sahab; "rupaye" after a number and fare talk are not lines; "bundle" unit; "kal parson" and "abhi" in talk are not a delivery day; long calls drop item-less and sentence lines; an item said as "nahi hain" is not a line. Also fixed: clauses never split at "aur" (a backspace character was in the regex). 207 tests |
 | docs (branch `docs-update`) | README rewritten for main; HANDOFF sections 1-10 brought up to date (pages, rules, code map, checks, shop-day checklist, demo and deck notes); DEPLOY host notes and checks updated |
 | junk lines (branch `junk-lines`) | From a real pump/motor shop call: a generic word with no quantity ("dal rahe ho" is the verb daalna) and a question about something not on the list ("advertisement kitna pada hoga") no longer become order lines; "bhejun" is filler. Every line has "✕ Hatao" to drop a line the app got wrong (`POST /api/line/remove`, counted as a correction). Real unknown items ("pachas motor", "barah submersible") still become yellow lines |
 | Excel template (branch `excel-template`) | Shops without Busy fill a plain Excel sheet: `GET /api/items/template.xlsx` and `/api/parties/template.xlsx` (header row only, plus a "Kaise bharein" help sheet; no example rows that could be imported by mistake). Import buttons now say "Busy / Excel se ...". The importer reads the sheet that has a Name header even if the help sheet was open when saved, and parties accept a "Spoken names" column. Bill photo / PDF import was considered and dropped: it would need OCR or an LLM |

@@ -54,6 +54,7 @@ pasted call transcript → clean-up ──────────────�
    read-back (local Piper Hindi voice) → "haan, pakka" → SQLite → parchi + CSV
 ```
 
+* **Sizes are part of the name.** "10 elbow 1 inch", `3/4"`, "sawa inchi", "chaar by teen", "1 hp" are one item, never a quantity, and "1 inch" is never taken for "2 inch".
 * **Never guesses.** A generic word ("sabun") asks the brand. A weak match shows the top three and asks. Two quantities ("10 ya 12", "10 se 12") ask. Two parties with the same name ("Sharma ji") ask which. A party with two open orders asks which in dispatch. Uncertain lines are yellow with "Pakka nahi hoon."
 * **Corrections:** "nahi, aath carton" changes only that line; "nahi, parso" changes only the day; "rehne do" changes nothing.
 * **"Pakka nahi" never saves.** Only a real yes ("haan pakka") or the Confirm button saves, and one order is saved once even on a double tap or a network retry.
@@ -83,7 +84,7 @@ SQLite (`/data/orders.db` in Docker): `orders` (party, lines, delivery date, sta
 .venv/bin/pytest -q          # or inside the container
 ```
 
-163 tests: spoken numbers, Devanagari, the 10 test phrases, small talk and rate talk, real-call lines, corrections, "nothing saved before confirm", the full API flow, Busy and Excel imports, which-party questions, teaching words, the local voice, pilot numbers, edit/cancel, offline save, PIN, and one test per bug found in the reviews. GitHub Actions runs them, then `docker compose up --build` with no keys, on every push and pull request.
+207 tests: spoken numbers, Devanagari, pipe and pump sizes ("1 inch", 3/4", "sawa inchi", "4 by 3", "1 hp"), the 10 test phrases, small talk and rate talk, real-call lines, corrections, "nothing saved before confirm", the full API flow, Busy and Excel imports, which-party questions, teaching words, the local voice, pilot numbers, edit/cancel, offline save, PIN, and one test per bug found in the reviews. GitHub Actions runs them, then `docker compose up --build` with no keys, on every push and pull request.
 
 ## Deploy (public URL)
 
@@ -96,7 +97,7 @@ app/        FastAPI backend: main (routes), dialog, parser, matcher, textnorm, t
             stt (Sarvam), tts (Piper voice), importer (Busy / Excel), pilot, db, catalog, samples
 static/     index.html, app.js, style.css (light + dark)
 scripts/    get_voice.py (downloads the local Hindi voice)
-tests/      pytest suite (163 tests)
+tests/      pytest suite (207 tests)
 .github/    CI: pytest + docker compose start check
 Dockerfile, docker-compose.yml, render.yaml, .env.example
 HANDOFF.md  status, what is tested, next steps, demo and deck notes

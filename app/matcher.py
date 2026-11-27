@@ -5,11 +5,13 @@ Rules (all in plain code):
 * A generic word like "sabun" maps to a group -> ask which brand.
 * Anything weaker is never guessed: we return the top three and ask.
 """
+import re
+
 from rapidfuzz import fuzz
 
-from .catalog import (AMBIGUOUS_PARTY_WORDS, CATALOG, GROUP_LABEL, GROUP_WORDS,
+from .catalog import (AMBIGUOUS_PARTY_WORDS, CATALOG, GENERIC_PARTY_WORDS, GROUP_LABEL, GROUP_WORDS,
                       ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change, on_parties_change)
-from .textnorm import norm
+from .textnorm import is_size, norm
 
 STRONG = 88
 WEAK = 55
@@ -22,6 +24,15 @@ _ITEM_INDEX = []
 @on_items_change
 def rebuild_item_index():
     _ITEM_INDEX[:] = [(norm(a), it["code"]) for it in CATALOG for a in it["aliases"] + [it["name"]] if norm(a)]
+    # Staff drop the brand on a list full of it: "elbow 1 inch" for "Astral Elbow 1''",
+    # "sumercible dedh hp water" for "Crompton Sumercible 1.5hp Water".
+    firsts = {}
+    for it in CATALOG:
+        w = (norm(it["name"]).split() or [""])[0]
+        firsts[w] = firsts.get(w, 0) + 1
+    brands = {w for w, n in firsts.items() if n >= 3 and w.isalpha()}
+    _ITEM_INDEX.extend((" ".join(a.split()[1:]), code) for a, code in list(_ITEM_INDEX)
+                       if len(a.split()) >= 3 and a.split()[0] in brands)
 
 
 rebuild_item_index()
@@ -50,13 +61,16 @@ def _ngrams(tokens, max_n=3):
     return grams
 
 
+_INCH_RE = re.compile(r"(\d)inch\b")
+
+
 def _score(phrase_tokens, alias):
     best = 0
-    for g in _ngrams(phrase_tokens):
+    for g in _ngrams(phrase_tokens, 5):  # long names: "crompton sumercible 1hp oil"
         # avoid tiny fragments matching long aliases ("ka" ~ "kachi ghani")
         if len(g) < 3 and g != alias:
             continue
-        s = fuzz.ratio(g, alias)
+        s = fuzz.ratio(_INCH_RE.sub(r"\1", g), _INCH_RE.sub(r"\1", alias))  # "4x3" = "4x3inch"
         if s == 100:  # an exact longer phrase beats a shorter one ("sarson tel" > "tel")
             s += 10 * (len(g.split()) - 1)
         if s > best:
@@ -64,11 +78,41 @@ def _score(phrase_tokens, alias):
     return best
 
 
+SIZE_MISS = 20  # a size said that the name does not have
+SIZE_CLASH = 20  # ...and the name has another size of that kind ("1inch" said, "2inch" in the name)
+SIZE_EXTRA = 5  # a size in the name that was not said ("10stage"): only breaks ties
+
+
+def _size_core(t):
+    """'2x1inch' and '2x1' are the same size (a cross size is often said without 'inch')."""
+    return re.sub(r"inch$", "", t)
+
+
+def _size_kind(t):
+    return "x" if "x" in t else re.sub(r"[\d.]+", "", t)
+
+
+def _sizes(tokens):
+    return {_size_core(t) for t in tokens if is_size(t)}
+
+
 def _ranked(phrase, index):
     tokens = norm(phrase).split()
+    sizes = _sizes(tokens)
+    words = [t for t in tokens if not is_size(t)]
     best = {}
     for alias, code in index:
-        s = _score(tokens, alias)
+        if not sizes:
+            s = _score(tokens, alias)
+        else:
+            # letters and sizes apart: "3inch elbow heavy" is Elbow 3", not Elbow 1" with closer letters
+            a_tokens = alias.split()
+            a_sizes = _sizes(a_tokens)
+            a_words = " ".join(t for t in a_tokens if not is_size(t))
+            s = _score(words, a_words) if words and a_words else (100 if not words and not a_words else 0)
+            for z in sizes - a_sizes:
+                s -= SIZE_MISS + (SIZE_CLASH if any(_size_kind(a) == _size_kind(z) for a in a_sizes) else 0)
+            s -= SIZE_EXTRA * len(a_sizes - sizes)
         if s > best.get(code, 0):
             best[code] = s
     return sorted(best.items(), key=lambda kv: -kv[1])
@@ -128,6 +172,16 @@ def party_option(code):
     return {"code": code, "name": PARTIES_BY_CODE[code]["name"]}
 
 
+_POLITE = {norm(w) for w in ["ji", "jee", "sahab", "saab", "sab", "bhai", "bhaiya", "bhaisahab", "sir", "seth",
+                              "lala", "babu", "wale", "wala", "vale", "ka", "ko", "ke", "ki", "haan", "han"]}
+
+
+def _lead(phrase):
+    """First real name word: 'shree ganesh hardware' -> 'ganesh'."""
+    words = phrase.split()
+    return next((w for w in words if w not in _POLITE and w not in GENERIC_PARTY_WORDS), words[0])
+
+
 def find_party(text: str):
     """Look for a party anywhere in the text. Returns (result, matched_phrase)."""
     tokens = norm(text).split()
@@ -144,9 +198,12 @@ def find_party(text: str):
             return {"status": "choose", "party": None, "options": opts}, g
     per_code = {}  # code -> (best score, phrase)
     for g in grams:
-        if len(g) < 3:
+        words = [w for w in g.split() if w not in _POLITE]
+        if len(g) < 3 or not words:  # "ji sahab" is politeness, not "Jain Sahab"
             continue
         for alias, code in _PARTY_INDEX:
+            if fuzz.ratio(_lead(g), _lead(alias)) < 75:  # the name itself must be close
+                continue
             s = fuzz.ratio(g, alias)
             if s > per_code.get(code, (0, None))[0]:
                 per_code[code] = (s, g)

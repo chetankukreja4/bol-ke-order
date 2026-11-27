@@ -3,6 +3,7 @@
 The server is stateless: the browser keeps the draft JSON and sends it back
 with each spoken answer. Every function here is plain code (no LLM).
 """
+import re
 import uuid
 
 from .catalog import ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, UNITS
@@ -22,8 +23,10 @@ def _fmt_qty(v):
 
 
 def _short(name):
-    """'Fortune Refined Oil 1L' -> 'Fortune Refined Oil' for speaking."""
-    words = [w for w in name.split() if not any(ch.isdigit() for ch in w)]
+    """'Fortune Refined Oil 1L' -> 'Fortune Refined Oil' for speaking. A pack size goes;
+    a fitting size stays ('Astral Elbow 3/4"'), or three elbows would sound the same."""
+    words = [w for w in name.split()
+             if not re.fullmatch(r"\(?\d+(\.\d+)?\s*(l|ml|ltr|litre|g|gm|gms|gram|kg|kgs)\)?", w, re.I)]
     return " ".join(words) or name
 
 

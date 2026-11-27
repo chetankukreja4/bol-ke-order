@@ -14,16 +14,18 @@ from datetime import datetime, timedelta, timezone
 
 from .catalog import DISPATCH_MODES, UNITS
 from .matcher import find_party, match_item
-from .textnorm import WEAK_NUMBER_WORDS, norm, parse_number_at
+from .textnorm import WEAK_NUMBER_WORDS, is_size, norm, parse_number_at
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
 _UNIT_WORDS = {norm(w): u for u, ws in UNITS.items() for w in ws}
 _ALT_WORDS = {"ya", "or", "yaa", "-", "to", "se"}  # "10 se 12 carton" = 10 or 12: ask
-_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur| and | plus | phir | fir | uske baad | sath mein | saath mein ")
+_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur\b| and | plus | phir | fir | uske baad | sath mein | saath mein ")
 _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "price", "discount",
                                "rupay", "rupaye", "rupee", "rs", "percent", "kam", "mehnga",
-                               "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment"]}
+                               "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment",
+                               "kiraya", "kiraye", "kirae", "bhada", "bhaada", "fare", "rupees"]}
+_MONEY = {norm(w) for w in ["rupay", "rupaye", "rupee", "rupees", "rs", "rupya", "paise", "ka kiraya"]}
 _STOP = {norm(w) for w in [
     "ko", "ka", "ki", "ke", "wale", "wala", "vale", "vala", "bhai", "ji", "sahab", "bhej", "bhejna",
     "bhejo", "bhejdo", "bhejun", "bhejoon", "bhejdu", "dena", "de", "dijiye", "dijie", "do", "chahiye", "chaiye", "hai", "hain",
@@ -42,7 +44,11 @@ _FILLER = {norm(w) for w in [
     "agar", "agr", "kuch", "kami", "peshi", "ayi", "aayi", "aaya", "aya", "toh", "tab", "sirf", "bas",
     "warna", "varna", "baaki", "baki", "mere", "mera", "meri", "kya", "kis", "kaisa", "kaise", "kaun",
     "chal", "raha", "rha", "rahi", "hua", "hui", "ho", "gaya", "gayi", "kaam", "cheez", "batao", "bata",
-    "achha", "maalik", "malik", "haal", "dekh", "dekho", "lagta", "lage", "lag", "kitna", "kitne"]}
+    "achha", "maalik", "malik", "haal", "dekh", "dekho", "lagta", "lage", "lag", "kitna", "kitne",
+    "hota", "hoti", "hoga", "hogi", "honge", "rakh", "rakhe", "rakha", "rakho", "keh", "kah", "rahe", "karva",
+    "karwa", "denge", "dikat", "dikkat", "bat", "baat", "bol", "dun", "dunga", "jayega", "jayegi", "jaega",
+    "puch", "pooch", "bikte", "rehte", "wali", "koi", "apne", "apke", "aapke", "pas", "paas",
+    "vahan", "wahan", "yahan", "idhar", "udhar"]}
 # A clause that starts like this gives the other quantity for the line before.
 _ELSE_STARTS = [norm(w).split() for w in ["nahi toh", "nahi to", "nahin toh", "nahin to", "nahi tho",
                                           "warna", "varna", "ya phir", "ya fir", "otherwise"]]
@@ -88,20 +94,27 @@ def parse_date(text: str):
                     ahead = (wd - today().weekday()) % 7 or 7
                     found.append((i, len(ww), today() + timedelta(days=ahead), words[0], w))
     kept = [f for f in found if not (f[0] + f[1] < len(toks) and toks[f[0] + f[1]] in _NOT_WORDS)]
+    vague = {i for i in range(len(toks) - 1) if toks[i] in _KAL and toks[i + 1] in _PARSO}
+    kept = [f for f in kept if f[0] not in vague and f[0] - 1 not in vague]  # "kal parso" = some day soon
+    kept = [f for f in kept if f[4] not in _NOW or _SEND & set(toks[f[0] + 1:f[0] + 4])]
     if not kept:
         return None
     _, _, d, label, heard = max(kept, key=lambda f: f[0])
     return {"date": d.isoformat(), "label": label, "heard": heard}
 
 
+_KAL = {norm(w) for w in _DAY_WORDS[1]}
+_PARSO = {norm(w) for w in _DAY_WORDS[2]}
+_NOW = {"abhi", "turant"}  # "abhi yahan rakha hai" is talk; "abhi bhej do" is a day
+_SEND = {norm(w) for w in ["bhej", "bhejo", "bhejna", "bhejdo", "bhijwa", "bhijwado", "bhejiye", "chahiye", "chaiye",
+                            "nikal", "nikalo", "dispatch", "de", "dena", "dedo", "do", "chahie"]}
 _DATE_TOKENS = {norm(w) for ws in list(_DAY_WORDS.values()) + list(_WEEKDAYS.values()) for w in ws}
 
 
 def _tokens(text):
     t = norm(text)
     t = re.sub(r"(\d)\s*-\s*(\d)", r"\1 ya \2", t)
-    t = re.sub(r"(\d)([a-z])", r"\1 \2", t)  # "10carton" -> "10 carton"
-    return t.split()
+    return t.split()  # norm already splits "10carton" and keeps sizes ("1inch") whole
 
 
 def _is_qty_start(toks, i):
@@ -176,7 +189,38 @@ def _parties_named(clauses):
     return found
 
 
+_MODE_WORDS = {norm(w) for ws in DISPATCH_MODES.values() for w in ws}
+LONG_CALL = 40  # words: a whole phone call, not one spoken order
+
+
+def _model_numbers(toks):
+    """Positions of numbers that finish an item name ("Mini Champ 1", "Win Plus 2"):
+    the words before it plus the number name one item, and that name has the number."""
+    out = set()
+    for i, t in enumerate(toks):
+        if not re.fullmatch(r"\d+", t) or i == 0 or (i + 1 < len(toks) and toks[i + 1] in _UNIT_WORDS):
+            continue
+        words = [w for w in _clean_item(toks[max(0, i - 4):i]) if not re.fullmatch(r"[\d.]+", w)]
+        if not words or not any(ch.isalpha() for w in words for ch in w):
+            continue
+        m = match_item(" ".join(words + [t]))
+        if m["status"] == "ok" and t in norm(m["item"]["name"]).split():
+            out.add(i)
+    return out
+
+
+def _call_talk(item):
+    """In a long call, a 'line' with no item, a sentence for an item ('chaar bundle aap bhi
+    rakh lo apke to bikte rehte honge') or only a vehicle ('chhah bundle ka ek rickshaw')
+    that matches nothing on the list is conversation. Short new names ('pachas motor')
+    stay, so staff can add them with 'Naya item banao'."""
+    if not item or all(t in _MODE_WORDS for t in item):
+        return True
+    return len(item) > 3 and match_item(" ".join(item))["status"] == "unknown"
+
+
 def extract_rules(text: str):
+    long_call = len(norm(text).split()) > LONG_CALL
     party_res, party_phrase = find_party(text)
     party_tokens = set(party_phrase.split()) if party_phrase else set()
     clauses = _SPLIT_RE.split(f" {text} ")
@@ -192,8 +236,15 @@ def extract_rules(text: str):
             continue
         # find quantity spans; each starts a new line
         spans, i = [], 0
+        model_nos = _model_numbers(toks)
         while i < len(toks):
+            if i in model_nos:  # "mini champ 1": part of the name
+                i += 1
+                continue
             q = _read_qty(toks, i)
+            if q and q["end"] < len(toks) and toks[q["end"]] in _MONEY:
+                i = q["end"] + 1  # "dhai sau rupaye": a price, not 250 of something
+                continue
             if q:
                 spans.append((i, q))
                 i = q["end"]
@@ -206,7 +257,7 @@ def extract_rules(text: str):
             # "ABC ko Lux bhejna kal": an item with no quantity is a line, and the app asks "kitna?"
             # only a clearly named item: a generic word alone ("dal rahe ho" is the verb daalna) is talk
             if named_item and match_item(" ".join(named_item))["status"] == "ok" and not _is_bargain(toks) \
-                    and not (_QUESTION_WORDS | _ASKING) & set(toks) and not _already_listed(named_item, lines):
+                    and not (_QUESTION_WORDS | _ASKING | _NOT_WORDS) & set(toks) and not _already_listed(named_item, lines):
                 lines.append({"heard": " ".join(toks), "item_text": " ".join(named_item),
                               "qty_values": [], "unit": None, "note": None})
             continue
@@ -227,14 +278,22 @@ def extract_rules(text: str):
             stop = spans[n + 1][0] if n + 1 < len(spans) else len(toks)
             after = [t for t in toks[q["end"]:stop] if t not in party_tokens]
             item = _clean_item(after)
+            before = _clean_item([t for t in toks[:start] if t not in party_tokens]) if n == 0 else []
             if not item and n == 0:  # "sabun 10 carton" (item said first)
-                item = _clean_item([t for t in toks[:start] if t not in party_tokens])
+                item = before
+            elif before and any(is_size(t) for t in before) and match_item(" ".join(item))["status"] != "ok":
+                item = before + item  # "pipe teen inch ke paanch heavy", "3 inch ke 5 pipe": one item
             if not item and last_item and (_REF & set(toks) or cond):  # "uski bees peti": the item said before
                 item = list(last_item)
             elif item:
                 last_item = item
             # "advertisement kitna pada hoga": a question about something not on the list is talk, not an order
             if item and (_QUESTION_WORDS | _ASKING) & set(toks) and match_item(" ".join(item))["status"] != "ok":
+                continue
+            # "saadhe teen sau to vahan se kiraya lagega": fare or price talk about nothing on the list
+            if _is_bargain(toks) and match_item(" ".join(item))["status"] not in ("ok", "choose"):
+                continue
+            if long_call and _call_talk(item):
                 continue
             lines.append({
                 "heard": " ".join(toks[start:stop]) if item else " ".join(toks),

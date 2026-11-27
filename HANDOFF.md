@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `fix/voice-sizes`, built on `main` 0f0db8f). Read this first if you are picking up the project.
+Last updated: 27 Nov 2026 (branch `docs-update-2`, built on `main` 7dab070). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -29,12 +29,14 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 
 | Item | Status |
 |---|---|
-| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 4,800 lines of app code + 1,400 lines of tests. Starts with no keys; a missing key shows "key not set". CI checks this on every push. |
+| 1. Public GitHub code with `docker-compose.yml`, starts with no secret keys, 300+ lines of own code | Done. About 5,100 lines of app code (3,400 Python + 1,700 web) + 1,750 lines of tests. Starts with no keys; a missing key shows "key not set". CI checks this on every push. |
 | 2. YouTube demo, 3 minutes or less | **To do.** Plan in section 9. Record it from the real shop test. |
 | 3. Pitch deck PDF (problem, users and how many, what it depends on, launch plan), key points as text | **To do.** Notes in section 10. Use the Pilot tab numbers. |
 | 4. Live link (optional bonus) | **To do.** Also needed for the phone mic (HTTPS). See `DEPLOY.md`. |
 
 Plan agreed on 27 Nov: feature freeze; only fix what the real shop test shows. Day 1 deploy + import the shop's lists + practice run; day 2 real orders in the shop (record the video, download the Pilot CSV); day 3 fixes, deck, video; submit on the 30th well before 11:59 pm.
+
+Progress on day 1 (27 Nov): the wholesaler's real Busy item lists (pipe fittings, pumps) and two real call recordings were run through the app; what they showed is fixed (#9 sizes, #10 review fixes, #11 voice sizes). Still to do: deploy, the party list, the shop day.
 
 A friend running `docker compose up --build` on their own machine is still a good last check (the organisers' tip).
 
@@ -115,7 +117,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **239 tests pass** locally (CI runs on the PR).
+- **239 tests pass** locally and in CI (pytest + compose on every PR; #9, #10 and #11 all green before merging).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
@@ -134,7 +136,7 @@ Not checked yet:
 
 - **Shop-day checklist (pilot):**
   1. Deploy (`DEPLOY.md`): `SARVAM_API_KEY` and `BKO_PIN` as secrets; volume at `/data`; start with a fresh `/data` (old test orders would count in the pilot numbers). Never set `BKO_DEMO` there.
-  2. Items tab: "Busy / Excel se items laayein", then parties; check the preview, then "Haan". No Busy? Fill the blank Excel template.
+  2. Items tab: "Busy / Excel se items laayein", then parties; check the preview, then "Haan". No Busy? Fill the blank Excel template. **An import replaces the whole list**, so export all items in one file: the wholesaler sent pipes and pumps as two separate "List of Items" files, and importing the second would drop the first. In Busy, export the list with all item groups, or paste both files into one sheet before importing. Add brands that are missing (the calls had "Prakash" and "Aeromax" pipes).
   3. Tick "Practice order" and run 5-10 of the shop's old recordings; on each yellow line use "Kisi item se jodo" / "Naya item banao", and "Hatao" for talk. The app learns the shop's words.
   4. Time 5 normal phone orders with a stopwatch (call end → entry done in Busy). Pilot tab → "Pehle ka time".
   5. Untick "Practice order" for real orders. When a saved order turns out wrong: Orders → open it → "Galat nikla?" (or Edit / Cancel before dispatch).
@@ -144,13 +146,14 @@ Not checked yet:
 - One shop only; no accounts beyond the optional PIN; no dues or payments (kept out on purpose).
 - Busy integration is CSV only. Bill photo / PDF import was dropped (it would need OCR or an LLM).
 - A brand that is not in the item list (the "Prakash" and "Aeromax" pipes in the real calls) stays a yellow line: add it to Busy or with "Naya item banao". A call still gives some yellow lines that are talk ("ek box", "chalis guna"); staff "Hatao" them.
-- A Piper voice reads names in English; Hinglish words the app says are mapped to Devanagari by a fixed word list in `app/tts.py` (add new words there).
+- A Piper voice reads names in English; Hinglish words the app says are mapped to Devanagari by a fixed word list in `app/tts.py` (add new words there). Sizes in names are said the shop way (`spoken_sizes`); a new size notation in a shop's list may need a rule there.
+- What staff see under a line ("heard: 5 astral ti 0.75inch") is the cleaned-up text the app matched, not the exact words said; the full words are in the Heard box above.
 - Cost: Sarvam speech-to-text per minute is the only per-order cost; the voice is local and free. Measure the cost per order in the pilot; the shop owner said he would pay about ₹2,000 a year.
 
 ## 9. Demo video plan (≤ 3 min)
 
 1. 0:00–0:20 Problem: parchi + typing into Busy, wrong orders = returns (shop footage).
-2. 0:20–1:20 Phone in the shop, hold **Order bolo** on a real order → the app reads it back in Hindi → one question → "haan, pakka" → parchi, WhatsApp.
+2. 0:20–1:20 Phone in the shop, hold **Order bolo** on a real order (sizes show it is real: "10 elbow ek inch, 5 tee pauna inch, 8 socket") → the app reads it back in Hindi → one question ("kaun sa socket?" → "aadha inch wala") → "haan, pakka" → parchi, WhatsApp.
 3. 1:20–1:50 Upload a real call recording with chat and bargaining: the talk is ignored; an unknown item is yellow → "Kisi item se jodo" → next order understands it.
 4. 1:50–2:15 Dispatch by voice: "Order 3, 4 aur 5 ek hi truck mein gaye" → read-back → "haan pakka".
 5. 2:15–2:40 Pilot tab: real numbers from the test day (time to confirm vs the stopwatch baseline, % right after saving).
@@ -173,6 +176,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| docs (branch `docs-update-2`) | HANDOFF, README and DEPLOY brought up to date with `main` 7dab070 after #9-#11: day-1 progress, line counts, CI state, "an import replaces the whole list" (export all items in one file), missing brands, the "heard" line, the size question in the demo plan |
 | voice sizes (branch `fix/voice-sizes`) | Found in the browser check: the voice read `3/4"` as "teen slash chaar", `2x1''` as "do x ek", `1.5hp` as "ek dashamlav paanch", and dropped "inch". `tts.spoken_sizes` now says sizes the shop way (पौना / आधा / डेढ़ / सवा / ढाई / साढ़े, बाय, इंच, किलो, डिग्री for 45*); the quotes round heard words in "Pakka nahi hoon. '...' matlab" are not inch marks. Checked by sending the voice's mp3 back through Sarvam. 239 tests |
 | review fixes (branch `fix/review-pr9`) | From the code review of PR #9: a brand-less name now goes to every item on a branded list, so Astral and Prince Elbow 1" tie and the app asks; "1 inch wala" answers a size question; the long-call talk filter runs only on uploads and pasted calls, so a long spoken order keeps "20 bori" and asks; a quoted number (`lux "10" carton`) is not inches; talk words that are in an item name stay ("Pass Pass", "Bat"); money words drop a line only if it names nothing on the list; "das kilo wala" stays 10 kg (a class only when a quantity follows); "90m" stays metres ("mm" marked before de-doubling); "rs 250" is a price; "bhej do abhi" is today. 227 tests |
 | real calls, pipes (branch `fix/real-call-pipes`) | From a real wholesaler's Busy lists and two call recordings: sizes are part of the name, never a quantity ("10 elbow 1 inch" was 2 lines, "3/4" was 3 and 4); size-aware matching, brand may be dropped, model numbers ("mini champ 1"); questions say the size; "ji sahab" no longer picks Jain Sahab; "rupaye" after a number and fare talk are not lines; "bundle" unit; "kal parson" and "abhi" in talk are not a delivery day; long calls drop item-less and sentence lines; an item said as "nahi hain" is not a line. Also fixed: clauses never split at "aur" (a backspace character was in the regex). 207 tests |

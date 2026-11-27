@@ -62,6 +62,9 @@ New → Blueprint → pick the repo. `render.yaml` is already set up. Free tier 
 
 ## After deploying, check
 
+- Items tab → "Busy se items laayein" and "Busy se parties laayein" with the shop's Busy export (.xlsx or CSV). The preview shows what will be loaded; "Haan" replaces the sample lists.
+- Pilot tab opens and shows 0 orders on a fresh `/data`.
+
 - `https://<your-url>/healthz` shows `{"ok":true}`
 - Home screen loads; the header shows which keys are set
 - "Try sample phrases" → tap the first one → Confirm screen asks "Kaun sa soap brand?"

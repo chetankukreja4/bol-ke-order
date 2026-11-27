@@ -8,12 +8,13 @@ Rules (all in plain code):
 from rapidfuzz import fuzz
 
 from .catalog import (AMBIGUOUS_PARTY_WORDS, CATALOG, GROUP_LABEL, GROUP_WORDS,
-                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change)
+                      ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, on_items_change, on_parties_change)
 from .textnorm import norm
 
 STRONG = 88
 WEAK = 55
 LEAD = 8
+MAX_CHOICES = 8  # a "which brand?" question never lists more than this
 
 _ITEM_INDEX = []
 
@@ -24,7 +25,20 @@ def rebuild_item_index():
 
 
 rebuild_item_index()
-_PARTY_INDEX = [(norm(a), p["code"]) for p in PARTIES for a in p["aliases"] + [p["name"]]]
+_PARTY_INDEX = []
+_PARTY_INDEX_SET = {}  # exact phrase -> party, except phrases that could mean two parties
+
+
+@on_parties_change
+def rebuild_party_index():
+    _PARTY_INDEX[:] = [(norm(a), p["code"]) for p in PARTIES for a in p["aliases"] + [p["name"]] if norm(a)]
+    _PARTY_INDEX_SET.clear()
+    for alias, code in _PARTY_INDEX:
+        if alias not in AMBIGUOUS_PARTY_WORDS:
+            _PARTY_INDEX_SET[alias] = code
+
+
+rebuild_party_index()
 _GROUP_INDEX = {norm(w): g for g, words in GROUP_WORDS.items() for w in words}
 
 
@@ -88,11 +102,18 @@ def match_item(phrase: str):
         group = next((_GROUP_INDEX[g] for g in _ngrams(tokens, 3) if g in _GROUP_INDEX), None)
 
     if top >= STRONG and (top - second >= LEAD or ranked[1][0] == top_code):
-        if group is None or ITEMS_BY_CODE[top_code]["group"] == group:
+        # An exact spoken name ("toor dal", "haldi powder") is never a guess, even
+        # if it contains a generic word and the item sits outside that group.
+        if group is None or ITEMS_BY_CODE[top_code]["group"] == group or top >= 100:
             return {"status": "ok", "item": item_option(top_code, top), "options": [], "group": group}
     if group is not None:
-        opts = [item_option(i["code"]) for i in CATALOG if i["group"] == group]
-        return {"status": "choose", "item": None, "options": opts, "group": group}
+        in_group = [i["code"] for i in CATALOG if i["group"] == group]
+        if len(in_group) > MAX_CHOICES:  # big real lists: the closest few of the group
+            score = dict(ranked)
+            in_group = sorted(in_group, key=lambda c: -score.get(c, 0))[:MAX_CHOICES]
+        if in_group:
+            return {"status": "choose", "item": None, "options": [item_option(c) for c in in_group], "group": group}
+        group = None  # nothing in that group: fall back to the closest names
     opts = [item_option(c, s) for c, s in ranked[:3]]
     if top >= WEAK:
         return {"status": "unsure", "item": None, "options": opts, "group": None}
@@ -110,7 +131,8 @@ def party_option(code):
 def find_party(text: str):
     """Look for a party anywhere in the text. Returns (result, matched_phrase)."""
     tokens = norm(text).split()
-    grams = _ngrams(tokens, 3)
+    # a number ("10 carton") or a fragment of it never names a party
+    grams = [g for g in _ngrams(tokens, 3) if any(ch.isalpha() for ch in g)]
     # exact ambiguous words first ("sharma" alone)
     for g in sorted(grams, key=lambda g: -len(g.split())):
         if g in _PARTY_INDEX_SET:
@@ -120,23 +142,25 @@ def find_party(text: str):
         if g in AMBIGUOUS_PARTY_WORDS:
             opts = [party_option(c) for c in AMBIGUOUS_PARTY_WORDS[g]]
             return {"status": "choose", "party": None, "options": opts}, g
-    best = (0, None, None)
+    per_code = {}  # code -> (best score, phrase)
     for g in grams:
         if len(g) < 3:
             continue
         for alias, code in _PARTY_INDEX:
             s = fuzz.ratio(g, alias)
-            if s > best[0]:
-                best = (s, code, g)
-    if best[0] >= STRONG:
-        return {"status": "ok", "party": party_option(best[1]), "options": []}, best[2]
+            if s > per_code.get(code, (0, None))[0]:
+                per_code[code] = (s, g)
+    ranked = sorted(per_code.items(), key=lambda kv: -kv[1][0])
+    if ranked and ranked[0][1][0] >= STRONG:
+        best_code, (best, phrase) = ranked[0]
+        close = [c for c, (s, _) in ranked[1:] if s >= STRONG and best - s < LEAD]
+        if close:  # "Shiv Trader": Shiv Traders or Shiva Traders? ask, never guess
+            opts = [party_option(c) for c in [best_code] + close[:2]]
+            return {"status": "choose", "party": None, "options": opts}, phrase
+        return {"status": "ok", "party": party_option(best_code), "options": []}, phrase
     return {"status": "missing", "party": None, "options": []}, None
 
 
-_PARTY_INDEX_SET = {}
-for _alias, _code in _PARTY_INDEX:
-    if _alias not in AMBIGUOUS_PARTY_WORDS:
-        _PARTY_INDEX_SET[_alias] = _code
 
 
 def choose_from(text: str, options, kind="item"):

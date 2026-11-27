@@ -29,11 +29,9 @@ SARVAM_LANG = os.getenv("SARVAM_STT_LANG", "hi-IN")
 
 def _keyterms():
     """Shop words that bias recognition (Sarvam allows 50 terms of up to 64 chars)."""
-    terms = []
-    for it in CATALOG:
-        terms.append(it["name"])
-    for p in PARTIES:
-        terms.append(p["name"])
+    # Party names first (hardest words for speech-to-text, and a big Busy item
+    # list would otherwise push them all out), then items to fill the 50.
+    terms = [p["name"] for p in PARTIES[:20]] + [it["name"] for it in CATALOG]
     # Only names. Unit words like "katta"/"bori" made Sarvam hear "carton" as "katta".
     seen, out = set(), []
     for t in terms:

@@ -1,6 +1,7 @@
 """Bol-ke-Order API + static frontend."""
 import csv
 import io
+import json
 import os
 import re
 import tempfile
@@ -36,6 +37,7 @@ from .dialog import answer, build_draft, validate_for_save
 from .parser import is_cancel, is_confirm, parse_dispatch, split_joined_number
 from .transcript import clean_transcript, looks_like_transcript
 from .samples import TEST_PHRASES
+from . import importer, pilot
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "static")
 MAX_UPLOAD = 30 * 1024 * 1024
@@ -43,6 +45,7 @@ ALLOWED = (".m4a", ".ogg", ".oga", ".opus", ".mp3", ".wav", ".webm", ".aac", ".m
 
 app = FastAPI(title="Bol-ke-Order")
 catalog.replace_items(db.list_items())  # the shop's own item list from SQLite
+catalog.replace_parties(db.list_parties())  # and its parties
 
 
 class DispatchTextIn(BaseModel):
@@ -54,6 +57,9 @@ class DispatchTextIn(BaseModel):
 class TextIn(BaseModel):
     text: str
     kind: str | None = None  # "transcript" = pasted call transcript
+    source: str | None = None  # mic | upload | transcript | typed (pilot numbers)
+    test: bool = False  # practice order: left out of the pilot numbers
+    elapsed: float | None = None  # seconds since staff started this order (mic / upload / paste)
 
 
 class AnswerIn(BaseModel):
@@ -162,6 +168,53 @@ def items_update(code: str, body: ItemIn):
     return saved
 
 
+MAX_IMPORT = 5 * 1024 * 1024
+
+
+async def _read_import(file: UploadFile, convert):
+    data = await file.read(MAX_IMPORT + 1)
+    if len(data) > MAX_IMPORT:
+        raise HTTPException(400, "File 5 MB se badi hai")
+    try:
+        rows = importer.read_table(file.filename or "", data)
+    except importer.ImportProblem as e:
+        raise HTTPException(400, str(e))
+    found, skipped = convert(rows)
+    return rows, found, skipped
+
+
+def _import_reply(rows, found, skipped, committed):
+    return {"total_rows": len(rows), "count": len(found), "sample": found[:10],
+            "skipped": skipped, "committed": committed}
+
+
+@app.post("/api/items/import")
+async def items_import(file: UploadFile = File(...), commit: int = 0):
+    """Busy item list. Without commit=1 it only shows what would be loaded."""
+    rows, items, skipped = await _read_import(file, lambda r: importer.to_items(r, catalog.CATALOG))
+    done = bool(commit) and bool(items)
+    if done:
+        db.replace_items(items)
+        catalog.replace_items(db.list_items())
+    return _import_reply(rows, items, skipped, done)
+
+
+@app.get("/api/parties")
+def parties_list():
+    return db.list_parties()
+
+
+@app.post("/api/parties/import")
+async def parties_import(file: UploadFile = File(...), commit: int = 0):
+    """Busy account list (customers). Without commit=1 it only shows what would be loaded."""
+    rows, parties, skipped = await _read_import(file, lambda r: importer.to_parties(r, catalog.PARTIES))
+    done = bool(commit) and bool(parties)
+    if done:
+        db.replace_parties(parties)
+        catalog.replace_parties(db.list_parties())
+    return _import_reply(rows, parties, skipped, done)
+
+
 @app.delete("/api/items/{code}")
 def items_delete(code: str):
     if not db.delete_item(code):
@@ -178,8 +231,11 @@ def parse(body: TextIn):
         draft = build_draft(cleaned["text"])
         draft["source"] = "transcript"
         draft["turns"] = cleaned["turns"]
+        draft["stats"] = pilot.new_stats("transcript", draft, body.test, body.elapsed)
         return draft
-    return build_draft(text)
+    draft = build_draft(text)
+    draft["stats"] = pilot.new_stats(body.source, draft, body.test, body.elapsed)
+    return draft
 
 
 @app.post("/api/answer")
@@ -210,6 +266,54 @@ def _csv(rows):
             w.writerow([o["id"], o["party"], ln["code"], ln["name"], ln["qty"], ln["unit"], o["delivery_date"], o["status"]])
     buf.seek(0)
     return buf
+
+
+class WrongIn(BaseModel):
+    reason: str
+
+
+class BaselineIn(BaseModel):
+    seconds: list[float]
+
+
+@app.post("/api/orders/{order_id}/wrong")
+def order_wrong(order_id: int, body: WrongIn):
+    if body.reason not in pilot.WRONG_REASONS:
+        raise HTTPException(400, f"Reason must be one of: {', '.join(pilot.WRONG_REASONS)}")
+    o = db.mark_wrong(order_id, body.reason)
+    if not o:
+        raise HTTPException(404, "Order not found")
+    return o
+
+
+def _baseline():
+    raw = db.get_meta("baseline_seconds")
+    return json.loads(raw) if raw else []
+
+
+@app.get("/api/pilot")
+def pilot_numbers():
+    base = _baseline()
+    out = pilot.summary(db.list_orders(100000), base)
+    out["baseline"] = base
+    return out
+
+
+@app.put("/api/pilot/baseline")
+def pilot_baseline(body: BaselineIn):
+    if len(body.seconds) > 50 or any(not 1 <= s <= 3600 for s in body.seconds):
+        raise HTTPException(400, "1 se 3600 second tak, 50 times tak")
+    db.set_meta("baseline_seconds", json.dumps(body.seconds))
+    return {"baseline": body.seconds}
+
+
+@app.get("/api/pilot.csv")
+def pilot_csv():
+    buf = io.StringIO()
+    csv.writer(buf).writerows(pilot.csv_rows(db.list_orders(100000)))
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="pilot-numbers.csv"'})
 
 
 @app.get("/api/orders/{order_id}/csv")

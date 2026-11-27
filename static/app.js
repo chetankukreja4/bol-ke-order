@@ -233,7 +233,7 @@ function bindMic(btn, { onInterim, onResult }) {
 
 // ------------------------------------------------------------------ screens
 // Pages: Order (with its flow screens), Orders, Dispatch, Items. One per tab.
-const TABS = ['order', 'orders', 'dispatch', 'items'];
+const TABS = ['order', 'orders', 'dispatch', 'items', 'pilot'];
 function show(name) {
   let tab = 'order';
   document.querySelectorAll('.screen').forEach((sc) => {
@@ -250,6 +250,7 @@ function show(name) {
   window.scrollTo(0, 0);
   if (name === 'orders' || name === 'dispatch') loadOrders();
   if (name === 'items') loadItems();
+  if (name === 'pilot') loadPilot();
 }
 function route() {
   const tab = location.hash.replace('#', '');
@@ -260,6 +261,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 // ------------------------------------------------------------ order capture
 async function handleCaptured(res, source) {
+  state.source = 'mic';
   state.blob = res.blob || state.blob;
   state.blobName = res.blob ? res.blobName : state.blobName;
   if (res.source !== 'server' && !res.text && res.blob && micEngine() === 'record') return sendRecording(); // no browser speech: server does it
@@ -311,7 +313,10 @@ async function parseTranscript() {
   const text = $('trText').value.trim();
   if (!text) return toast('Pehle order bolein ya likhein');
   try {
-    const d = await post('/api/parse', { text, kind: state.textKind || null });
+    const d = await post('/api/parse', {
+      text, kind: state.textKind || null, source: state.source || 'typed', test: $('testOrder').checked,
+      elapsed: state.startedAt ? (Date.now() - state.startedAt) / 1000 : null,
+    });
     state.draft = d;
     if (d.notice === 'unclear') {
       if (state.textKind === 'transcript') return toast('Is transcript mein koi item nahi mila. Text check karein.', 4000);
@@ -373,6 +378,7 @@ async function saveOrder() {
   if (!state.draft?.ready) return toast('Pehle sawaal ka jawab dein');
   try {
     state.order = await post('/api/orders', { draft: state.draft });
+    state.startedAt = null; // the next order starts its own clock
     renderDone();
     speak(`Order ${state.order.id} save ho gaya.`);
   } catch (e) {
@@ -385,7 +391,7 @@ function renderDone(viewOnly) {
   show('done');
   $('dnTitle').textContent = viewOnly ? `Parchi #${o.id}` : '✔ Order saved';
   $('dnNew').textContent = viewOnly ? '← Back to orders' : '+ New order';
-  $('dnNew').onclick = viewOnly ? () => show('orders') : () => { state.draft = null; state.blob = null; show('order'); };
+  $('dnNew').onclick = viewOnly ? () => show('orders') : () => { state.draft = null; state.blob = null; state.startedAt = null; show('order'); };
   const rows = o.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.name)}<br><small>${esc(l.code)}</small></td><td><b>${esc(l.qty)}</b> ${esc(l.unit)}</td></tr>`).join('');
   const fmtDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const created = new Date(o.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
@@ -396,6 +402,62 @@ function renderDone(viewOnly) {
   // What the app heard is for staff to check on screen only; it is not printed.
   $('dnHeard').innerHTML = o.heard_text ? `<b>App ne suna:</b> "${esc(o.heard_text)}"` : '';
   $('dnCsv').href = `/api/orders/${o.id}/csv`;
+  renderWrong();
+}
+
+// "Galat nikla": the saved order turned out wrong. Counted in the pilot numbers.
+const WRONG = { item: 'Item galat', qty: 'Quantity galat', party: 'Party galat', missing: 'Item chhoot gaya', other: 'Kuch aur' };
+function renderWrong(open) {
+  const o = state.order, box = $('dnWrong');
+  if (o.wrong_reason) {
+    box.innerHTML = `<div class="status bad">✗ Galat nikla: ${esc(WRONG[o.wrong_reason] || o.wrong_reason)}</div>`;
+    return;
+  }
+  if (!open) {
+    box.innerHTML = '<button class="btn btn-outline btn-sm" id="wrongOpen">✗ Galat nikla?</button>';
+    $('wrongOpen').onclick = () => renderWrong(true);
+    return;
+  }
+  box.innerHTML = `<div class="card small"><b>Kya galat tha?</b><div class="opts">${
+    Object.entries(WRONG).map(([k, v]) => `<button class="btn btn-outline btn-sm" data-r="${k}">${v}</button>`).join('')
+  }</div></div>`;
+  box.querySelectorAll('[data-r]').forEach((b) => b.onclick = async () => {
+    try {
+      state.order = await post(`/api/orders/${o.id}/wrong`, { reason: b.dataset.r });
+      renderWrong();
+      toast('Note ho gaya');
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message); }
+  });
+}
+
+// ------------------------------------------------------------------ pilot
+const fmtSec = (s) => (s === null || s === undefined ? '–' : s < 90 ? `${Math.round(s)} s` : `${(s / 60).toFixed(1)} min`);
+const fmtPct = (p) => (p === null || p === undefined ? '–' : `${p}%`);
+async function loadPilot() {
+  let p;
+  try { p = await api('/api/pilot'); } catch (e) { $('pilotTiles').innerHTML = empty('Numbers nahi aaye. Network check karein.'); return; }
+  const tile = (big, label) => `<div class="stat"><b>${big}</b><span>${label}</span></div>`;
+  $('pilotTiles').innerHTML = [
+    tile(`${p.today} / ${p.orders}`, 'Orders (aaj / kul)'),
+    tile(fmtSec(p.median_seconds), 'App: order shuru se pakka (median)'),
+    tile(fmtSec(p.baseline_median), 'Pehle: parchi + Busy (median)'),
+    tile(fmtPct(p.pct_right_after_save), 'Save ke baad sahi nikle'),
+    tile(fmtPct(p.pct_no_questions), 'Bina sawaal ke pakke'),
+    tile(p.corrections_per_order ?? '–', 'Sudhaar per order'),
+  ].join('');
+  const src = Object.entries(p.by_source).map(([k, v]) => `${esc(k)} ${v}`).join(' · ') || '–';
+  const wrong = Object.entries(p.wrong_by_reason).map(([k, v]) => `${esc(WRONG[k] || k)} ${v}`).join(' · ') || 'koi nahi';
+  $('pilotMore').innerHTML = `<div><b>Order kaise aaye:</b> ${src}</div><div><b>Galat nikle:</b> ${wrong}</div>
+    <div><b>Average time:</b> ${fmtSec(p.avg_seconds)} · <b>Pehle ke naap:</b> ${p.baseline_count}</div>`;
+  $('baseInput').value = (p.baseline || []).join(', ');
+}
+async function saveBaseline() {
+  const seconds = $('baseInput').value.split(/[,\s]+/).filter(Boolean).map(Number);
+  if (seconds.some((n) => !Number.isFinite(n))) return toast('Sirf numbers likhein, jaise 180, 240');
+  try {
+    await api('/api/pilot/baseline', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ seconds }) });
+    toast('Save ho gaya'); loadPilot();
+  } catch (e) { toast(e.network ? 'Network nahi hai' : e.message); }
 }
 
 // --------------------------------------------------------------- dispatch
@@ -530,11 +592,64 @@ function initItems() {
   $('itemClose').onclick = () => $('itemDlg').close();
   $('itemForm').onsubmit = (e) => { e.preventDefault(); saveItem(); };
   $('itemDelete').onclick = deleteItem;
+  $('partySearch').addEventListener('input', renderParties);
+  [['impItems', 'items'], ['impParties', 'parties']].forEach(([id, kind]) => $(id).onchange = (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) previewImport(kind, f);
+  });
 }
 
 async function loadItems() {
   try { state.items = await api('/api/items'); } catch (_) { state.items = null; }
   renderItems();
+  try { state.parties = await api('/api/parties'); } catch (_) { state.parties = null; }
+  renderParties();
+}
+
+function renderParties() {
+  const box = $('partiesList');
+  if (!state.parties) { box.innerHTML = empty('Could not load parties (offline?).'); return; }
+  const q = $('partySearch').value.trim().toLowerCase();
+  const rows = state.parties.filter((p) => !q || [p.code, p.name, ...p.aliases].some((t) => t.toLowerCase().includes(q)));
+  $('partiesCount').textContent = state.parties.length;
+  box.innerHTML = rows.length ? rows.map((p) => `<div class="row-card static">
+      <span class="code">${esc(p.code)}</span>
+      <div class="rc-main"><b>${esc(p.name)}</b><small class="muted">${esc(p.aliases.join(', '))}</small></div>
+    </div>`).join('') : empty(q ? `No party matches "${esc(q)}".` : 'No parties yet.');
+}
+
+// Busy import: first a preview, then "haan" replaces the whole list.
+const IMPORT_LABEL = { items: 'items', parties: 'parties' };
+async function previewImport(kind, file) {
+  const box = $('impBox');
+  box.classList.remove('hidden');
+  box.innerHTML = 'File padh rahe hain…';
+  const send = (commit) => {
+    const fd = new FormData(); fd.append('file', file, file.name);
+    return api(`/api/${kind}/import${commit ? '?commit=1' : ''}`, { method: 'POST', body: fd });
+  };
+  let p;
+  try { p = await send(false); } catch (e) {
+    box.innerHTML = `<div class="status bad">${esc(e.network ? 'Network nahi hai' : e.message)}</div>`; return;
+  }
+  const skipped = p.skipped.length ? `<details><summary>${p.skipped.length} line(s) chhodi</summary><ul>${
+    p.skipped.slice(0, 50).map((s) => `<li>Line ${s.row}: ${esc(s.name || '(khaali)')} — ${esc(s.reason)}</li>`).join('')}</ul></details>` : '';
+  const names = p.sample.map((x) => `<li>${esc(x.name)}${x.unit ? ` <small>(${esc(x.unit)})</small>` : ''}</li>`).join('');
+  box.innerHTML = `<b>${p.count} ${IMPORT_LABEL[kind]} mile</b> <small>(${p.total_rows} lines mein se)</small>
+    <ul>${names}</ul>${p.count > 10 ? `<small>…aur ${p.count - 10}</small>` : ''}${skipped}
+    ${p.count ? `<div class="actions"><button class="btn btn-outline" id="impNo">Rehne do</button>
+      <button class="btn" id="impYes">Haan, purani list hata kar ye daalein</button></div>` : '<div class="status bad">Is file mein kuch nahi mila.</div>'}`;
+  if (!p.count) return;
+  $('impNo').onclick = () => box.classList.add('hidden');
+  $('impYes').onclick = async () => {
+    try {
+      const r = await send(true);
+      box.classList.add('hidden');
+      toast(`${r.count} ${IMPORT_LABEL[kind]} daal diye`);
+      try { state.cfg = await api('/api/config'); } catch (_) {}
+      loadItems();
+    } catch (e) { toast(e.network ? 'Network nahi hai, dobara try karein' : e.message, 4000); }
+  };
 }
 
 function renderItems() {
@@ -631,7 +746,7 @@ async function init() {
   $('pills').querySelector('[data-mic]')?.addEventListener('click', toggleMic);
   $('samples').innerHTML = (c.test_phrases || []).map((p, i) => `<button class="chip" data-i="${i}">${esc(p.text)}</button>`).join('');
   $('samplesCount').textContent = (c.test_phrases || []).length || '';
-  $('samples').querySelectorAll('.chip').forEach((b) => b.onclick = () => showTranscript(c.test_phrases[b.dataset.i].text, false));
+  $('samples').querySelectorAll('.chip').forEach((b) => b.onclick = () => { state.source = 'typed'; showTranscript(c.test_phrases[b.dataset.i].text, false); });
 
   bindMic($('micOrder'), { onInterim: (t) => ($('liveText').textContent = t), onResult: (r) => { $('liveText').textContent = ''; handleCaptured(r, 'mic'); } });
   answerMic = bindMic($('micAnswer'), { onInterim: (t) => ($('answerLive').textContent = t), onResult: (r) => {
@@ -643,9 +758,21 @@ async function init() {
   $('fileInput').onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
     state.blob = f; state.blobName = f.name; e.target.value = '';
+    state.source = 'upload';
     sendRecording();
   };
-  $('typedGo').onclick = () => showTranscript($('typed').value, false);
+  $('typedGo').onclick = () => { state.source = 'typed'; showTranscript($('typed').value, false); };
+  $('baseSave').onclick = saveBaseline;
+  // Pilot clock: starts when staff begin an order (mic, recording, paste, type, sample).
+  const startClock = () => { if (!state.startedAt) state.startedAt = Date.now(); };
+  ['micOrder', 'pasteOpen', 'typedOpen'].forEach((id) => {
+    $(id).addEventListener('pointerdown', startClock);
+    $(id).addEventListener('click', startClock);
+  });
+  $('fileInput').addEventListener('click', startClock);
+  $('samples').addEventListener('click', startClock, true);
+  try { $('testOrder').checked = localStorage.getItem('bko-test') === '1'; } catch (_) {}
+  $('testOrder').onchange = () => { try { localStorage.setItem('bko-test', $('testOrder').checked ? '1' : '0'); } catch (_) {} };
   $('trGo').onclick = parseTranscript;
   $('trText').addEventListener('focus', () => clearTimeout(state.autoTimer));
   $('trRetry').onclick = sendRecording;
@@ -654,7 +781,7 @@ async function init() {
   $('cfConfirm').onclick = saveOrder;
   $('cfBack').onclick = () => { showTranscript(state.draft?.heard || '', false, 'Text theek karein, phir Samjho dabayein.'); clearTimeout(state.autoTimer); };
   $('dnPrint').onclick = () => window.print();
-  $('dnNew').onclick = () => { state.draft = null; state.blob = null; show('order'); };
+  $('dnNew').onclick = () => { state.draft = null; state.blob = null; state.startedAt = null; show('order'); };
   const openCard = (id, field) => {
     ['pasteCard', 'typedCard'].forEach((c) => { if (c !== id) $(c).classList.add('hidden'); });
     const c = $(id); c.classList.toggle('hidden');

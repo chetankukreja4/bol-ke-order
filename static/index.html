@@ -15,7 +15,7 @@
     document.documentElement.setAttribute('data-theme', t);
   })();
 </script>
-<link rel="stylesheet" href="/static/style.css?v=9">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body>
 <header class="top no-print">
@@ -31,6 +31,7 @@
   <a href="#orders" data-tab="orders" class="tab"><span class="tab-ic">📋</span><span>Orders</span></a>
   <a href="#dispatch" data-tab="dispatch" class="tab"><span class="tab-ic">🚚</span><span>Dispatch</span></a>
   <a href="#items" data-tab="items" class="tab"><span class="tab-ic">📦</span><span>Items</span></a>
+  <a href="#pilot" data-tab="pilot" class="tab"><span class="tab-ic">📊</span><span>Pilot</span></a>
 </nav>
 
 <main>
@@ -59,6 +60,7 @@
     </button>
   </div>
   <p class="note">⚠ Recording a customer's call needs their consent. Ask them first.</p>
+  <label class="check"><input id="testOrder" type="checkbox"> Practice order <small>(pilot ke numbers mein nahi gina jayega)</small></label>
 
   <div id="pasteCard" class="card hidden">
     <h3>Paste call transcript</h3>
@@ -122,6 +124,7 @@
   <div id="dnTitle" class="saved no-print">✔ Order saved</div>
   <div id="parchi" class="parchi"></div>
   <p id="dnHeard" class="heard-note no-print"></p>
+  <div id="dnWrong" class="wrong no-print"></div>
   <div class="actions no-print">
     <button id="dnPrint" class="btn btn-outline">🖨 Print parchi</button>
     <a id="dnCsv" class="btn btn-outline" href="#">⬇ CSV for billing</a>
@@ -160,8 +163,34 @@
     <button id="itemAdd" class="btn btn-sm">+ Add item</button>
   </div>
   <p class="sub">The app only matches what people say to items on this list. Add the names customers really use ("sarson ka tel", "parle") as spoken names.</p>
+  <div class="imports">
+    <label class="btn btn-outline btn-sm"><input id="impItems" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se items laayein</label>
+    <label class="btn btn-outline btn-sm"><input id="impParties" type="file" accept=".csv,.xlsx" hidden>⬆ Busy se parties laayein</label>
+  </div>
+  <div id="impBox" class="card hidden" aria-live="polite"></div>
   <input id="itemSearch" type="search" placeholder="Search by name, code or spoken name" autocomplete="off">
   <div id="itemsList" class="list"></div>
+
+  <h3 class="sec-h">Parties <span class="count" id="partiesCount"></span></h3>
+  <p class="sub">Badalne ke liye Busy se nayi list laayein (Sundry Debtors).</p>
+  <input id="partySearch" type="search" placeholder="Search party" autocomplete="off">
+  <div id="partiesList" class="list"></div>
+</section>
+
+<!-- ============================== PILOT (numbers for the shop test) -->
+<section id="screen-pilot" class="screen" data-tab="pilot">
+  <div class="page-h">
+    <h2>Pilot numbers</h2>
+    <a class="btn btn-outline btn-sm" href="/api/pilot.csv">⬇ CSV</a>
+  </div>
+  <p class="sub">Har asli order ka hisaab. Practice orders yahan nahi gine jaate. App ka time mic dabane / recording ya transcript daalne se "haan pakka" tak hai; Busy mein CSV daalna isme shamil nahi.</p>
+  <div id="pilotTiles" class="stats"></div>
+  <div id="pilotMore" class="card"></div>
+  <details class="card">
+    <summary>Pehle ka time (parchi + Busy)</summary>
+    <p class="sub">Pilot se pehle stopwatch se 5 phone orders naapein: call khatam hone se Busy mein entry tak. Second mein likhein, comma se alag. (Deck mein app ke time ke saath Busy mein CSV daalne ka time bhi jodein, taaki dono ek jaisa naapein.)</p>
+    <div class="row"><input id="baseInput" inputmode="numeric" placeholder="180, 240, 150"><button id="baseSave" class="btn">Save</button></div>
+  </details>
 </section>
 </main>
 
@@ -185,6 +214,6 @@
 </dialog>
 
 <div id="toast" class="toast hidden" role="status"></div>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

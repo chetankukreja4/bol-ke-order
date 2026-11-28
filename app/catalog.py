@@ -97,7 +97,7 @@ def ambiguous_words(parties):
 
 UNITS = {
     "carton": ["carton", "kartan", "kartun", "cartoon", "kartoon", "karton", "peti", "box", "dabba", "dibba", "cartons"],
-    "bag": ["bori", "bora", "bag", "katta", "bags", "boriya"],
+    "bag": ["bori", "bora", "bag", "katta", "katte", "kattey", "bags", "boriya"],
     "packet": ["packet", "pkt", "paket", "packets", "pack", "paiket", "pakit", "pakat"],
     "piece": ["piece", "pc", "pcs", "nag", "pieces", "pis", "pees"],
     "kg": ["kg", "kilo", "kilogram", "kgs"],

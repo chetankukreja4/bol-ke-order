@@ -84,7 +84,7 @@ SQLite (`/data/orders.db` in Docker): `orders` (party, lines, delivery date, sta
 .venv/bin/pytest -q          # or inside the container
 ```
 
-330 tests: Hinglish in Roman, Hindi and mixed script, spoken numbers (incl. sau / hazaar and saadhe / sawa / paune), Devanagari, pipe and pump sizes ("1 inch", 3/4", "sawa inchi", "4 by 3", "1 hp"), the 10 test phrases, small talk and rate talk, real-call lines, corrections, "nothing saved before confirm", the full API flow, Busy and Excel imports, which-party questions, teaching words, the local voice, pilot numbers, edit/cancel, offline save, PIN, and one test per bug found in the reviews. GitHub Actions runs them, then `docker compose up --build` with no keys, on every push and pull request.
+349 tests: two-person shop calls (prices, pack sizes, echoes, totals, later changes), Hinglish in Roman, Hindi and mixed script, spoken numbers (incl. sau / hazaar and saadhe / sawa / paune), Devanagari, pipe and pump sizes ("1 inch", 3/4", "sawa inchi", "4 by 3", "1 hp"), the 10 test phrases, small talk and rate talk, real-call lines, corrections, "nothing saved before confirm", the full API flow, Busy and Excel imports, which-party questions, teaching words, the local voice, pilot numbers, edit/cancel, offline save, PIN, and one test per bug found in the reviews. GitHub Actions runs them, then `docker compose up --build` with no keys, on every push and pull request.
 
 ## Deploy (public URL)
 
@@ -97,7 +97,7 @@ app/        FastAPI backend: main (routes), dialog, parser, matcher, textnorm, t
             stt (Sarvam), tts (Piper voice), importer (Busy / Excel), pilot, db, catalog, samples
 static/     index.html, app.js, style.css (light + dark)
 scripts/    get_voice.py (downloads the local Hindi voice)
-tests/      pytest suite (330 tests)
+tests/      pytest suite (349 tests)
 .github/    CI: pytest + docker compose start check
 Dockerfile, docker-compose.yml, render.yaml, .env.example
 HANDOFF.md  status, what is tested, next steps, demo and deck notes

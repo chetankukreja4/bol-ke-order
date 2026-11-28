@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from .catalog import DISPATCH_MODES, UNITS
 from .matcher import find_party, is_item_word, match_item
-from .textnorm import WEAK_NUMBER_WORDS, is_size, norm, parse_number_at
+from .textnorm import WEAK_NUMBER_WORDS, WORD_TO_NUM, is_size, norm, parse_number_at
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -26,6 +26,20 @@ _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "pr
                                "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment",
                                "kiraya", "kiraye", "kirae", "bhada", "bhaada", "fare", "rupees"]}
 _MONEY = {norm(w) for w in ["rupay", "rupaye", "rupee", "rupees", "rs", "rupya", "paise", "inr"]}
+# A number right before these is a price: "paanch sau ka rate", "490 lagega", "500 ka padega".
+_PRICE_AFTER = {norm(w) for w in ["rate", "bhav", "bhaav", "daam", "price", "lagega", "lagegi", "padega", "padegi",
+                                   "lagta", "padta", "chal", "rupay", "rupaye", "rupee", "rs"]}
+_PRICE_BEFORE = {norm(w) for w in ["rate", "bhav", "bhaav", "daam", "price", "rs"]}
+# "4 ya 5 din mein": a delivery time, not 4 of something
+_TIME_AFTER = {norm(w) for w in ["din", "dino", "dinon", "days", "day", "hafte", "hafta", "ghante", "ghanta",
+                                  "mahine", "mahina", "minute", "minat", "baje"]}
+# "ek peti ke andar baarah hote hain": how many come in a pack, not an order
+_PACK_WORDS = {norm(w) for w in ["andar", "hote", "hota", "hoti", "aate", "aati"]}  # not "aata": that is atta
+_ITEM_COUNT_WORDS = {norm(w) for w in ["item", "items", "aitem", "cheez", "cheezein", "cheeze", "chizen", "saman",
+                                        "line", "lines", "naam"]}
+_TOTAL_WORDS = {norm(w) for w in ["total", "kul", "milake", "milakar", "mila ke"]}
+_CHANGE_WORDS = [norm(p).split() for p in ["kar dijiye", "kar dijie", "kar do", "kar dena", "kar dijiyega", "karo",
+                                          "kariye", "kar lijiye", "kar dete", "kardo", "kardijiye"]]
 _STOP = {norm(w) for w in [
     "ko", "ka", "ki", "ke", "wale", "wala", "vale", "vala", "bhai", "ji", "sahab", "bhej", "bhejna",
     "bhejo", "bhejdo", "bhejun", "bhejoon", "bhejdu", "dena", "de", "dijiye", "dijie", "do", "chahiye", "chaiye", "hai", "hain",
@@ -47,7 +61,7 @@ _FILLER = {norm(w) for w in [
     "achha", "maalik", "malik", "haal", "dekh", "dekho", "lagta", "lage", "lag", "kitna", "kitne",
     "hota", "hoti", "hoga", "hogi", "honge", "rakh", "rakhe", "rakha", "rakho", "keh", "kah", "rahe", "karva",
     "karwa", "denge", "dikat", "dikkat", "bat", "baat", "bol", "dun", "dunga", "jayega", "jayegi", "jaega",
-    "puch", "pooch", "bikte", "rehte", "wali", "koi", "apne", "apke", "aapke", "pas", "paas",
+    "puch", "pooch", "bikte", "rehte", "wali", "koi", "apne", "apke", "aapke", "pas", "paas", "padegi", "padega", "lagega", "lagegi", "padta", "kam", "jayenge", "jaenge", "jayengi", "dono", "donon", "tino", "tinon",
     "vahan", "wahan", "yahan", "idhar", "udhar"]}
 # A clause that starts like this gives the other quantity for the line before.
 _ELSE_STARTS = [norm(w).split() for w in ["nahi toh", "nahi to", "nahin toh", "nahin to", "nahi tho",
@@ -179,6 +193,8 @@ def _tokens(text, collapse=True):
     t = norm(text)
     t = re.sub(r"(\d)\s*-\s*(\d)", r"\1 ya \2", t)
     toks = t.split()
+    # "do do katte", "chaar chaar kar dijiye", "do-do peti": a number said twice is said once
+    toks = [w for k, w in enumerate(toks) if not (k > 0 and w == toks[k - 1] and (w.isdigit() or w in WORD_TO_NUM))]
     for i, (_, _, used) in reversed(date_spans(toks)):  # "3 tarikh" is the delivery day, not 3 of an item
         del toks[i:i + used]
     i = 0
@@ -202,6 +218,8 @@ def _is_qty_start(toks, i):
         v2, u2 = parse_number_at(toks, i + 1)
         rng = isinstance(v, int) and isinstance(v2, int) and v < v2 <= 2 * v + 2 and u2 == 1 and nxt.isalpha() \
             and i + 2 < len(toks) and toks[i + 2] in _UNIT_WORDS  # "teen chaar carton": 3 or 4
+        if nxt in ("kar", "karo", "kardo", "kardijiye"):  # "toor dal teen kar do"
+            rng = True
         if nxt not in _UNIT_WORDS and not rng:  # "bhej do", "ek minute" are not quantities
             return None, 0
     return v, used
@@ -354,6 +372,110 @@ def _model_numbers(toks):
     return out
 
 
+def _not_an_order_number(toks, i, q, long_call):
+    """A price ("paanch sau ka rate", "490 lagega"), a delivery time ("4 ya 5 din mein")
+    or, in a long call, a pack size ("ek peti ke andar baarah hote hain"), a variant
+    ("das kilo wale") or a price said with no unit ("chaar sau nabbe chal raha hai")."""
+    after = [t for t in toks[q["end"]:q["end"] + 3] if t not in ("ka", "ke", "ki", "hi", "to")]
+    if after and after[0] in _PRICE_AFTER and not q["unit"]:
+        return True
+    if i > 0 and toks[i - 1] in _PRICE_BEFORE and not q["unit"]:
+        return True
+    if q["end"] < len(toks) and toks[q["end"]] in _TIME_AFTER:
+        return True
+    if not long_call:
+        return False
+    window = []
+    for t in toks[q["end"]:q["end"] + 5]:  # up to the next number: "ek carton mein kitne Parle G hote hain"
+        if window and parse_number_at([t], 0)[0] is not None and t not in WEAK_NUMBER_WORDS:
+            break
+        window.append(t)
+    if _PACK_WORDS & set(window) or _PACK_WORDS & set(toks[max(0, i - 2):i]):  # "48 hote hain", "andar baarah"
+        return True
+    if q["end"] < len(toks) and toks[q["end"]] in ("wala", "wale", "vala", "vale", "wali", "vali"):
+        return True
+    return not q["unit"] and max(q["values"]) >= 100
+
+
+_CHANGE_FILLER = {norm(w) for w in ["kar", "dijiye", "dijie", "do", "dena", "dijiyega", "karo", "kariye", "lijiye",
+                                     "dete", "kardo", "kardijiye", "ek", "kaam", "aap", "ap", "bhai", "ji", "haan",
+                                     "sir", "phir", "fir", "to", "na", "bas", "hi"]}
+
+
+def _change_said(toks):
+    """'chaar chaar kar dijiye' / 'paanch kar do': a new quantity for the line just said."""
+    return any(toks[k:k + len(p)] == p for p in _CHANGE_WORDS for k in range(len(toks)))
+
+
+_VARIANT_WORDS = {norm(w) for w in ["pink", "yellow", "pila", "peela", "laal", "lal", "red", "hara", "green", "blue",
+                                    "nila", "neela", "kala", "safed", "white", "black", "bada", "bade", "chhota",
+                                    "chhote", "medium", "small", "large", "alag", "deluxe", "premium", "sasta",
+                                    "mehenga", "mehnga", "wala", "wale", "wali", "vala", "vale", "se", "bhi"]}
+_ADD_WORDS = {norm(w) for w in ["aur", "bhi", "alag", "extra", "add", "plus", "upar"]}
+
+
+_DROP_PHRASES = [norm(p).split() for p in ["rehne do", "rahne do", "rehne dijiye", "mat bhejo", "mat bhejna",
+                                           "nahi chahiye", "nahin chahiye", "cancel", "hata do", "hatao", "chhod do"]]
+
+
+def _dropped_item(raw, lines):
+    """'Dettol rehne do': the line for that item goes, and nothing new is added."""
+    for p in _DROP_PHRASES:
+        k = next((k for k in range(len(raw) - len(p) + 1) if raw[k:k + len(p)] == p), None)
+        if k is None:
+            continue
+        words = _clean_item(raw[:k])
+        code = (match_item(" ".join(words)).get("item") or {}).get("code") if words else None
+        if code:
+            lines[:] = [ln for ln in lines if (match_item(ln["item_text"]).get("item") or {}).get("code") != code]
+            return True
+    return False
+
+
+def _fills_unnamed(item, q, lines):
+    last = lines[-1]
+    if not item or match_item(" ".join(item))["status"] != "ok":
+        return False
+    if match_item(last["item_text"])["status"] == "ok" if last["item_text"] else False:
+        return False
+    if last["qty_values"] == q["values"] and (q["unit"] or last["unit"]) == (last["unit"] or q["unit"]):
+        last["item_text"] = " ".join(item)
+        last["unit"] = last["unit"] or q["unit"]
+        return True
+    return False
+
+
+def _update_named(item, q, lines):
+    code = (match_item(" ".join(item)).get("item") or {}).get("code")
+    target = next((ln for ln in reversed(lines) if code and ln["qty_values"]
+                   and (match_item(ln["item_text"]).get("item") or {}).get("code") == code), None)
+    if target is None or len(q["values"]) != 1:
+        return False
+    target["qty_values"] = q["values"]
+    target["unit"] = q["unit"] or target["unit"]
+    return True
+
+
+def _echo_of(item, q, lines):
+    code = (match_item(" ".join(item)).get("item") or {}).get("code")
+    if not code:
+        return False
+    for ln in lines:
+        if ln["qty_values"] == q["values"] and (match_item(ln["item_text"]).get("item") or {}).get("code") == code:
+            ln["said_at"] = _next_said(lines)  # "total baarah" after the echo goes to this line
+            return True
+    return False
+
+
+def _next_said(lines):
+    return 1 + max([x.get("said_at", 0) for x in lines] + [0])
+
+
+def _last_said(lines):
+    """The line talked about last: the newest one, or one repeated back after it."""
+    return max(lines, key=lambda ln: (ln.get("said_at", 0), lines.index(ln)))
+
+
 def _call_talk(item):
     """In a long call, a 'line' with no item, a sentence for an item ('chaar bundle aap bhi
     rakh lo apke to bikte rehte honge') or only a vehicle ('chhah bundle ka ek rickshaw')
@@ -361,13 +483,16 @@ def _call_talk(item):
     stay, so staff can add them with 'Naya item banao'."""
     if not item or all(t in _MODE_WORDS for t in item):
         return True
+    if len(item) == 1 and len(item[0]) <= 3 and match_item(item[0])["status"] != "ok":
+        return True  # "baarah can", "12 gaye": an echo, not a new item
     return len(item) > 3 and match_item(" ".join(item))["status"] == "unknown"
 
 
 def extract_rules(text: str, call: bool = False):
     """call=True for an uploaded recording or a pasted call transcript; a long one is
     full of talk. A spoken or typed order keeps every line and asks about it."""
-    long_call = call and len(norm(text).split()) > LONG_CALL
+    # a whole call: many words, or many turns (Sarvam puts each speaker turn on its own line)
+    long_call = call and (len(norm(text).split()) > LONG_CALL or text.count("\n") >= 6)
     party_res, party_phrase = find_party(text)
     party_tokens = set(party_phrase.split()) if party_phrase else set()
     clauses = _SPLIT_RE.split(f" {text} ")
@@ -382,6 +507,36 @@ def extract_rules(text: str, call: bool = False):
         if not toks:
             continue
         raw = _tokens(clause, collapse=False)
+        if long_call and _dropped_item(raw, lines):  # "Dettol rehne do", "Tide mat bhejo"
+            continue
+        if long_call and _TOTAL_WORDS & set(raw) and lines:
+            # "to chhah se total baarah ho gaye": the line before now comes to the total
+            nums = [v for v in (parse_number_at(raw, k)[0] for k in range(len(raw))) if v is not None]
+            k_total = next(k for k, t in enumerate(raw) if t in _TOTAL_WORDS)
+            after = [v for v in (parse_number_at(raw, k)[0] for k in range(k_total + 1, len(raw))) if v is not None]
+            counting_items = _ITEM_COUNT_WORDS & set(raw)  # "total do item ho gaye" counts lines, not cartons
+            named_code = (match_item(" ".join(_clean_item(raw))).get("item") or {}).get("code") if _clean_item(raw) else None
+            last = next((ln for ln in lines if named_code and
+                         (match_item(ln["item_text"]).get("item") or {}).get("code") == named_code), None)
+            order_total = after and len(lines) > 1 and after[0] == sum(max(ln["qty_values"] or [0]) for ln in lines)
+            last = last or (None if order_total else _last_said(lines))  # "total sattais carton" = the whole order
+            if last and after and last["item_text"] and isinstance(after[0], int) and not counting_items \
+                    and max(last["qty_values"] or [0]) <= after[0] <= 9999:  # a total is never less
+                last["qty_values"] = [after[0]]
+                last["heard"] += " / " + " ".join(raw)
+            if nums:
+                continue
+        if long_call and lines and _change_said(raw) and not _clean_item(
+                [t for t in raw if t not in _CHANGE_FILLER and parse_number_at(raw, raw.index(t))[0] is None]):
+            k = next((k for k in range(len(raw)) if _read_qty(raw, k)), None)
+            q = _read_qty(raw, k) if k is not None else None
+            if q and len(q["values"]) == 1 and not _not_an_order_number(raw, k, q, True):
+                target = next((ln for ln in reversed(lines) if ln["item_text"] and ln["qty_values"]), None)
+                if target:  # "do do katte Aashirvaad ... ek kaam kariye, chaar chaar kar dijiye"
+                    target["qty_values"] = q["values"]
+                    target["unit"] = q["unit"] or target["unit"]
+                    target["heard"] += " / " + " ".join(raw)
+                    continue
         if raw and lines and _fix_markers(raw, 0) == len(raw):  # "no wait," / "nahi nahi," then the right quantity
             fix_next = True
             continue
@@ -405,7 +560,7 @@ def extract_rules(text: str, call: bool = False):
             lines[-1]["heard"] += " / " + " ".join(toks)
             continue
         # find quantity spans; each starts a new line
-        spans, i = [], 0
+        spans, skipped, i = [], [], 0
         model_nos = _model_numbers(toks)
         while i < len(toks):
             if i in model_nos:  # "mini champ 1": part of the name
@@ -414,6 +569,10 @@ def extract_rules(text: str, call: bool = False):
             q = _read_qty(toks, i)
             if q and ((q["end"] < len(toks) and toks[q["end"]] in _MONEY) or (i > 0 and toks[i - 1] in _MONEY)):
                 i = q["end"] + 1  # "dhai sau rupaye": a price, not 250 of something
+                continue
+            if q and _not_an_order_number(toks, i, q, long_call):
+                skipped.append(i)  # still ends the item name of the line before
+                i = q["end"]
                 continue
             if q:
                 spans.append((i, q))
@@ -446,6 +605,7 @@ def extract_rules(text: str, call: bool = False):
         cond = _condition(toks)
         for n, (start, q) in enumerate(spans):
             stop = spans[n + 1][0] if n + 1 < len(spans) else len(toks)
+            stop = min([stop] + [k for k in skipped if k > start])
             after = [t for t in toks[q["end"]:stop] if t not in party_tokens]
             item = _clean_item(after)
             before = _clean_item([t for t in toks[:start] if t not in party_tokens]) if n == 0 else []
@@ -453,7 +613,7 @@ def extract_rules(text: str, call: bool = False):
                 item = before
             elif before and any(is_size(t) for t in before) and match_item(" ".join(item))["status"] != "ok":
                 item = before + item  # "pipe teen inch ke paanch heavy", "3 inch ke 5 pipe": one item
-            if not item and last_item and (_REF & set(toks) or cond):  # "uski bees peti": the item said before
+            if not item and last_item and (_REF & set(toks) or (cond and not long_call)):  # "uski bees peti": the item said before
                 item = list(last_item)
             elif item:
                 last_item = item
@@ -463,12 +623,37 @@ def extract_rules(text: str, call: bool = False):
             # "saadhe teen sau to vahan se kiraya lagega": fare or price talk about nothing on the list
             if _is_bargain(toks) and match_item(" ".join(item))["status"] in ("unknown", "missing"):
                 continue
+            if long_call and not item and lines and not lines[-1]["qty_values"] and lines[-1]["item_text"] \
+                    and len(q["values"]) == 1:
+                lines[-1]["qty_values"] = q["values"]  # "Amul ghee ke can chahiye. Kitne carton? Do carton."
+                lines[-1]["unit"] = q["unit"]
+                lines[-1]["heard"] += " / " + " ".join(toks)
+                lines[-1]["said_at"] = _next_said(lines)
+                continue
             if long_call and _call_talk(item):
                 continue
+            if long_call and (_change_said(toks) or _NOT_WORDS & set(toks)) and _update_named(item, q, lines):
+                continue  # "nahi yaar cheeni aath kar do": the cheeni line is now 8
+            if long_call and lines and _fills_unnamed(item, q, lines):
+                continue  # "chalo do bori de do" / "do bori basmati": the shop names what the 2 bags are
+            if long_call and _echo_of(item, q, lines):
+                continue  # the shop repeating it back ("chhah peti Lux ho gaya"): same item, same quantity
+            if long_call and lines and item and all(t in _VARIANT_WORDS for t in item):
+                # "pink wala do peti alag se": a kind of the item before, not a new item. Shown on that
+                # line for staff to check; a later "total chhah" sets the number.
+                prev = _last_said(lines)
+                note = f"{' '.join(item)}: {' ya '.join(map(str, q['values']))} {q['unit'] or ''}".strip()
+                if note not in (prev.get("note") or ""):
+                    prev["note"] = f"{prev['note']}; {note}" if prev.get("note") else note
+                continue
+            if long_call and not _ADD_WORDS & set(toks) and _update_named(item, q, lines):
+                continue  # the same item again with another number later in the call: the later one counts
             lines.append({
+                "said_at": _next_said(lines),
                 "heard": " ".join(toks[start:stop]) if item else " ".join(toks),
                 "item_text": " ".join(item),
-                "qty_values": q["values"],
+                # in a call, a number with no unit in price talk is never taken as sure: the app asks "kitna?"
+                "qty_values": [] if long_call and not q["unit"] and _is_bargain(toks) else q["values"],
                 "unit": q["unit"],
                 "note": cond,
             })

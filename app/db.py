@@ -134,13 +134,6 @@ def open_orders(party_code):
             "SELECT * FROM orders WHERE party_code=? AND status='confirmed' ORDER BY id DESC", (party_code,))]
 
 
-def latest_open_order(party_code):
-    with _conn() as c:
-        r = c.execute("SELECT * FROM orders WHERE party_code=? AND status='confirmed' ORDER BY id DESC LIMIT 1",
-                      (party_code,)).fetchone()
-        return _row(r) if r else None
-
-
 def mark_dispatched(order_id, mode):
     with _conn() as c:
         c.execute("UPDATE orders SET status='dispatched', dispatch_mode=?, dispatch_date=? WHERE id=?",

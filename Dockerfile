@@ -14,7 +14,8 @@ COPY tests ./tests
 COPY scripts ./scripts
 
 # Local Hindi voice for the spoken read-back (Piper hi_IN pratham, ~64 MB). No key, no per-order cost.
-RUN python scripts/get_voice.py /app/models
+# If the download fails (no internet to Hugging Face), the build still finishes and the browser voice is used.
+RUN python scripts/get_voice.py /app/models || (echo "Hindi voice not downloaded; the app will use the browser voice" && rm -rf /app/models/*)
 
 # Run as a normal user; orders are stored in /data (mount a volume there)
 RUN useradd --create-home appuser && mkdir -p /data && chown -R appuser /data /app

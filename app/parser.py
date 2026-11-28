@@ -10,7 +10,7 @@ a clause with a quantity is kept even if it mentions the rate.
 No LLM is used anywhere: the app keeps working if any AI service goes away.
 """
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .catalog import DISPATCH_MODES, UNITS
 from .matcher import find_party, is_item_word, match_item
@@ -56,7 +56,7 @@ _ELSE_STARTS = [norm(w).split() for w in ["nahi toh", "nahi to", "nahin toh", "n
 _DAY_WORDS = {
     0: ["aaj", "aj", "today", "abhi", "turant"],
     1: ["kal", "tomorrow", "kl"],
-    2: ["parso", "parson", "parsoon", "day after"],
+    2: ["parso", "parson", "parsoon", "parason", "parsom", "day after"],  # परसों -> "parason"
 }
 _WEEKDAYS = {0: ["somvar", "monday"], 1: ["mangalvar", "mangal", "tuesday"],
              2: ["budhvar", "budh", "wednesday"], 3: ["guruvar", "veervar", "thursday"],
@@ -70,6 +70,57 @@ def today():
 
 _ASKING = {"kitna", "kitne", "kitni", "kaisa", "kaise", "kaisi", "kaun", "kyun", "kab"}  # question words
 _NOT_WORDS = {"nahi", "nahin", "nai", "na", "mat", "not", "no"}
+
+
+_TARIKH = {norm(w) for w in ["tarikh", "tareekh", "tarik", "tariq"]}  # not "date": that is also the fruit
+_MONTHS = {}
+for _m, _ws in enumerate([["january", "jan", "janvari", "janwari"], ["february", "feb", "farvari", "farwari"],
+                          ["march"], ["april", "aprail"], [], ["june", "jun"], ["july", "julai"],
+                          ["august", "aug", "agast"], ["september", "sept", "sitambar"],
+                          ["october", "oct", "aktubar", "oktober"], ["november", "nov", "navambar", "nawambar"],
+                          ["december", "dec", "disambar", "december"]], 1):  # "may" / "mai" is also "I"
+    for _w in _ws:
+        _MONTHS[norm(_w)] = _m
+
+
+def _day_of_month(toks, i):
+    """'3 tarikh', '15 tareekh', '3 december', 'teen tarikh ko' -> (date, label, tokens used) or None."""
+    v, used = parse_number_at(toks, i)
+    if not isinstance(v, int) or not 1 <= v <= 31 or i + used >= len(toks):
+        return None
+    nxt = toks[i + used]
+    t = today()
+    try:
+        if nxt in _MONTHS:
+            d = date(t.year, _MONTHS[nxt], v)
+            if d < t:
+                d = date(t.year + 1, _MONTHS[nxt], v)
+            return d, f"{v} {d.strftime('%b')}", used + 1
+    except ValueError:  # "30 february"
+        return None
+    if nxt in _TARIKH:
+        y, m = t.year, t.month
+        if v < t.day:  # "3 tarikh" on the 28th = the 3rd of next month
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        for _ in range(3):  # "31 tarikh" in a 30-day month = the next month that has a 31st
+            try:
+                return date(y, m, v), f"{v} tarikh", used + 1
+            except ValueError:
+                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return None
+
+
+def date_spans(toks):
+    """Token positions of '3 tarikh' / '3 december' (a date, never a quantity)."""
+    out, i = [], 0
+    while i < len(toks):
+        r = _day_of_month(toks, i)
+        if r:
+            out.append((i, r))
+            i += r[2]
+        else:
+            i += 1
+    return out
 
 
 def parse_date(text: str):
@@ -93,6 +144,8 @@ def parse_date(text: str):
                 if toks[i:i + len(ww)] == ww:
                     ahead = (wd - today().weekday()) % 7 or 7
                     found.append((i, len(ww), today() + timedelta(days=ahead), words[0], w))
+    for i, (d, label, used) in date_spans(toks):
+        found.append((i, used, d, label, " ".join(toks[i:i + used])))
     kept = [f for f in found if not (f[0] + f[1] < len(toks) and toks[f[0] + f[1]] in _NOT_WORDS)]
     vague = {i for i in range(len(toks) - 1) if toks[i] in _KAL and toks[i + 1] in _PARSO}
     kept = [f for f in kept if f[0] not in vague and f[0] - 1 not in vague]  # "kal parso" = some day soon
@@ -111,10 +164,21 @@ _SEND = {norm(w) for w in ["bhej", "bhejo", "bhejna", "bhejdo", "bhijwa", "bhijw
 _DATE_TOKENS = {norm(w) for ws in list(_DAY_WORDS.values()) + list(_WEEKDAYS.values()) for w in ws}
 
 
-def _tokens(text):
+def _tokens(text, collapse=True):
     t = norm(text)
     t = re.sub(r"(\d)\s*-\s*(\d)", r"\1 ya \2", t)
-    return t.split()  # norm already splits "10carton" and keeps sizes ("1inch") whole
+    toks = t.split()
+    for i, (_, _, used) in reversed(date_spans(toks)):  # "3 tarikh" is the delivery day, not 3 of an item
+        del toks[i:i + used]
+    i = 0
+    while collapse and i < len(toks):  # "10 carton nahi 12 carton Lux": only the second quantity counts
+        q1 = _read_qty(toks, i)
+        k = q1["end"] if q1 else -1
+        if q1 and len(q1["values"]) == 1 and k < len(toks) and toks[k] in _NOT_WORDS and _read_qty(toks, k + 1):
+            del toks[i:k + 1]
+            continue
+        i += 1
+    return toks  # norm already splits "10carton" and keeps sizes ("1inch") whole
 
 
 def _is_qty_start(toks, i):
@@ -145,6 +209,23 @@ def _read_qty(toks, i):
         unit = _UNIT_WORDS[toks[j]]
         j += 1
     return {"values": vals, "unit": unit, "end": j}
+
+
+def _inline_fix(toks):
+    """'10 nahi 12' / '10 carton nahi 12 carton' / 'nahi, 12' said right after a line:
+    the quantity of the line before changes. Returns the new quantity, or None."""
+    nots = [k for k, t in enumerate(toks) if t in _NOT_WORDS]
+    if len(nots) != 1:
+        return None
+    k = nots[0]
+    if k > 0:
+        q1 = _read_qty(toks, 0)
+        if not q1 or q1["end"] != k:
+            return None
+    q2 = _read_qty(toks, k + 1)
+    if not q2 or q2["end"] != len(toks) or len(q2["values"]) != 1:
+        return None
+    return q2
 
 
 def _is_bargain(toks):
@@ -235,6 +316,12 @@ def extract_rules(text: str, call: bool = False):
     for clause in clauses:
         toks = _tokens(clause)
         if not toks:
+            continue
+        fix = _inline_fix(_tokens(clause, collapse=False)) if lines else None
+        if fix:  # "10 carton Lux, 10 nahi 12": the line before is 12, no new line
+            lines[-1]["qty_values"] = fix["values"]
+            lines[-1]["unit"] = fix["unit"] or lines[-1]["unit"]
+            lines[-1]["heard"] += " / " + " ".join(toks)
             continue
         # find quantity spans; each starts a new line
         spans, i = [], 0
@@ -387,11 +474,6 @@ def find_order_numbers(text: str):
             if isinstance(v, int) and v > 0:
                 return {"numbers": [v], "count": count}
     return {"numbers": [], "count": count}
-
-
-def find_order_number(text: str):
-    nums = find_order_numbers(text)["numbers"]
-    return nums[0] if nums else None
 
 
 def split_joined_number(n: int, open_ids, count=None):

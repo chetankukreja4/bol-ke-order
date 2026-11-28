@@ -1,6 +1,6 @@
 # Handoff: Bol-ke-Order
 
-Last updated: 27 Nov 2026 (branch `docs-update-3`, built on `main` 95b9aab). Read this first if you are picking up the project.
+Last updated: 28 Nov 2026 (branch `claude/project-thread-lnqsy9`, built on `main` 5af6ee9). Read this first if you are picking up the project.
 
 > **Rule for every AI agent or person working here (Claude, Codex, anyone):** after any change you commit,
 > update this file in the same commit: section 3 (status), 5 (code map), 7 (checked / not checked),
@@ -100,7 +100,7 @@ Pages (tabs `#order`, `#orders`, `#dispatch`, `#items`, `#pilot`):
 | `scripts/get_voice.py` | Downloads the Piper voice into `models/` (git-ignored); the Dockerfile runs it |
 | `static/` | `index.html` (5 tabs), `app.js` (mic engines, voice, pages, teach dialog, offline queue, PIN prompt, imports), `style.css` (Codex look; light + dark). Bump `?v=` on the CSS/JS links when you change them |
 | `.github/workflows/tests.yml` | CI: pytest; then `docker compose up --build` with no keys, `/healthz`, main screen, "key not set", one typed order |
-| `tests/` | 239 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, `test_review_pr9`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
+| `tests/` | 280 tests (`test_orders`, `test_import`, `test_pilot`, `test_bugfixes`, `test_tts`, `test_improvements`, `test_review_fixes`, `test_teach`, `test_template`, `test_junk_lines`, `test_real_calls` with `tests/fixtures/pipe_items.csv`, `test_review_pr9`, `test_review_round2`, a cut of a real pipe/pump list without prices). They never read `.env` (`BKO_NO_DOTENV=1`) |
 
 The server keeps no session state: the browser holds the draft order and sends it back with each answer.
 
@@ -108,7 +108,7 @@ The server keeps no session state: the browser holds the draft order and sends i
 
 ```bash
 docker compose up --build          # http://localhost:8000
-pytest -q                          # 239 tests (CI runs them, then the compose check, on every push)
+pytest -q                          # 280 tests (CI runs them, then the compose check, on every push)
 ```
 
 Windows local dev (already set up): `.venv\Scripts\python -m uvicorn app.main:app --reload`. Restart a server started without `--reload` after pulling new code: the page loads new JavaScript at once, but old Python keeps running (this caused "still same" on 27 Nov).
@@ -120,7 +120,7 @@ Deploy: see `DEPLOY.md`. Needs a Dockerfile build, port 8000, HTTPS, a volume at
 ## 7. What is checked and what is not
 
 Checked:
-- **239 tests pass** locally and in CI (pytest + compose on every PR; #9 to #12 all green before merging, and the `main` runs after each merge passed too).
+- **280 tests pass** locally (279 + 1 skipped without the voice model) and in CI (pytest + compose on every PR; #9 to #12 all green before merging, and the `main` runs after each merge passed too).
 - **Docker** (GitHub Actions on every push and PR): `docker compose up --build` with no keys, `/healthz`, the main screen, "key not set", one typed order. Docker is not installed on the dev PC. Memory use on a 512 MB host is not measured.
 - **Sarvam** with the real key: about 0.7 s for a 10 s clip (tested with a Windows text-to-speech sample).
 - **Local voice**: a full order spoke 4 lines from `/api/speak` in the browser with no fallback; the owner chose the voice from samples.
@@ -147,6 +147,7 @@ Not checked yet:
 - The browser's speech recognition works best in Chrome/Edge and needs internet. Browsers without it fall back to recording + server STT, which needs the Sarvam key.
 - On Android Chrome the live mic does not also keep a recording, so "retry with the same recording" only works for uploads and desktop.
 - One shop only; no accounts beyond the optional PIN; no dues or payments (kept out on purpose).
+- Spoken quantities: Hindi numbers 1-99 (also in Devanagari), sau / hazaar, and saadhe / sawa / paune / dedh / dhai before them ("saadhe teen sau" = 350, "dedh hazaar" = 1500). "saath" is never 60 (it means "with"). A date can be "3 tarikh" or "3 december"; "may" is not read as a month (it is also "I").
 - Busy integration is CSV only. Bill photo / PDF import was dropped (it would need OCR or an LLM).
 - A brand that is not in the item list (the "Prakash" and "Aeromax" pipes in the real calls) stays a yellow line: add it to Busy or with "Naya item banao". A call still gives some yellow lines that are talk ("ek box", "chalis guna"); staff "Hatao" them.
 - A Piper voice reads names in English; Hinglish words the app says are mapped to Devanagari by a fixed word list in `app/tts.py` (add new words there). Sizes in names are said the shop way (`spoken_sizes`); a new size notation in a shop's list may need a rule there.
@@ -179,6 +180,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| review round 2 (branch `claude/project-thread-lnqsy9`) | From the 28 Nov pre-submission review. Quantities were saved wrong with no question: "saadhe teen sau" was 300, "sava sau" 100, "paune do sau" 200, "डेढ़ सौ" 100, "dedh hazaar packet" 1.5 carton, "saadhe paanch" 5; now 350, 125, 175, 150, 1500 packet, 5.5 (`textnorm.parse_number_at`: `QTY_HALF`, hazaar). Hindi-script units पैकेट / लीटर / पीस were not units (so "3 लीटर तेल" saved as 3 carton). परसों was not a day. Number words 31-99 added (and their Devanagari spellings like "pachapan"). "3 tarikh" / "15 तारीख" / "3 december" are the delivery date (`parser.date_spans`), not a line. "10 nahi 12" inside the order changes that quantity instead of adding junk lines. A yellow line with nothing to suggest asks "10 carton kya? Item ka naam bolein." instead of "'ye item' matlab ?". The Docker build no longer fails if the Hindi voice cannot be downloaded (the browser voice is used); the download has a 60 s timeout. Removed unused `db.latest_open_order`, `parser.find_order_number`, `pilot.now_iso`. 280 tests |
 | code graph (branch `claude/project-thread-0fvxwz`) | Added `graphify-out/` (graph of all code and docs: 818 nodes, 43 clusters, no import cycles; hubs `build_draft`, `norm`, `answer`). Cache and local paths git-ignored. No app code changed |
 | docs (branch `docs-update-3`) | Section 3 now quotes the Round 2 brief (public repo, YouTube walkthrough, idea deck; deployed link optional); CI note covers #12 and its `main` run; section 11 no longer says Dostack (host not chosen) |
 | 95b9aab (#12, branch `docs-update-2`) | HANDOFF, README and DEPLOY brought up to date with `main` 7dab070 after #9-#11: day-1 progress, line counts, CI state, "an import replaces the whole list" (export all items in one file), missing brands, the "heard" line, the size question in the demo plan |

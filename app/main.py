@@ -357,8 +357,15 @@ def create_order(body: DraftIn):
             raise HTTPException(404, "Order not found")
         if o["status"] != "confirmed":
             raise HTTPException(409, f"Order {o['id']} ab badal nahi sakta ({o['status']})")
-        return db.update_order(o["id"], d)
-    return db.save_order(d)
+        saved = db.update_order(o["id"], d)
+    else:
+        saved = db.save_order(d)
+    # Staff picked the item for a line the app was not sure about, then said "haan pakka":
+    # the words heard for it become a spoken name, so next time it matches by itself.
+    for ln in d["lines"]:
+        if ln.get("learn"):
+            _learn(ln["item"]["code"], str(ln["learn"])[:60], "answer", saved["id"])
+    return saved
 
 
 @app.get("/api/orders/{order_id}/draft")
@@ -414,6 +421,39 @@ def _learnable(words):
     return w if len(w) >= 3 and any(ch.isalpha() for ch in w) and w not in generic else ""
 
 
+def _learn(code, heard, source, order_id=None):
+    """Keep what was heard as a spoken name of the item staff chose. Returns (learned, note).
+    Never a generic word ("sabun"), a number, or a name another item already uses."""
+    words = _learnable(heard)
+    item = db.get_item(code)
+    if not words or not item or not any(ch.isalpha() for ch in words.replace(" ", "")):
+        return False, None
+    other = next((o for o in catalog.CATALOG if o["code"] != code and
+                  words in {a.lower() for a in o["aliases"]} | {o["name"].lower()}), None)
+    if other:
+        return False, f"'{words}' pehle se {other['name']} ka naam hai, isliye yaad nahi kiya"
+    if words in item["aliases"] or words == item["name"].lower():
+        return False, None
+    item["aliases"] = (item["aliases"] + [words])[:30]
+    db.save_item(item, old_code=code)
+    db.add_learned(code, words, source, order_id)
+    catalog.replace_items(db.list_items())
+    return True, None
+
+
+@app.get("/api/learned")
+def learned_list():
+    return db.list_learned()
+
+
+@app.delete("/api/learned/{learned_id}")
+def learned_delete(learned_id: int):
+    if not db.delete_learned(learned_id):
+        raise HTTPException(404, "Nahi mila")
+    catalog.replace_items(db.list_items())
+    return {"deleted": learned_id}
+
+
 @app.post("/api/teach")
 def teach(body: TeachIn):
     """Link a "Pakka nahi hoon" line to an item the staff chose, and learn the
@@ -424,19 +464,7 @@ def teach(body: TeachIn):
     line = next((ln for ln in body.draft.get("lines", []) if ln.get("id") == body.line_id), None)
     if line is None:
         raise HTTPException(400, "Line nahi mili")
-    words = _learnable(line.get("item_text"))
-    learned, note = False, None
-    if body.learn and words:
-        item = db.get_item(code)
-        other = next((o for o in catalog.CATALOG if o["code"] != code and
-                      words in {a.lower() for a in o["aliases"]} | {o["name"].lower()}), None)
-        if other:
-            note = f"'{words}' pehle se {other['name']} ka naam hai, isliye yaad nahi kiya"
-        elif words not in item["aliases"]:
-            item["aliases"] = (item["aliases"] + [words])[:30]
-            db.save_item(item, old_code=code)
-            catalog.replace_items(db.list_items())
-            learned = True
+    learned, note = _learn(code, line.get("item_text"), "jodo") if body.learn else (False, None)
     d = link_line(copy.deepcopy(body.draft), body.line_id, code)
     return {"draft": d, "learned": learned, "note": note}
 

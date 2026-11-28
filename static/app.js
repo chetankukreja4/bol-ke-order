@@ -779,6 +779,25 @@ async function loadItems() {
   renderItems();
   try { state.parties = await api('/api/parties'); } catch (_) { state.parties = null; }
   renderParties();
+  loadLearned();
+}
+
+// Spoken names the app learned from staff (Jodo, or an answered question then "haan pakka").
+const LEARN_SOURCE = { jodo: 'jodo', answer: 'jawab', stt: 'awaaz' };
+async function loadLearned() {
+  const box = $('learnedList');
+  let rows;
+  try { rows = await api('/api/learned'); } catch (_) { box.innerHTML = empty('Could not load (offline?).'); return; }
+  $('learnedCount').textContent = rows.length;
+  box.innerHTML = rows.length ? rows.map((r) => `<div class="row-card static">
+      <span class="code">${esc(r.item_code)}</span>
+      <div class="rc-main"><b>"${esc(r.words)}"</b> → ${esc(r.item_name || r.item_code)}<small class="muted">${esc(LEARN_SOURCE[r.source] || r.source)}${r.order_id ? ` · order #${esc(r.order_id)}` : ''}</small></div>
+      <button class="btn btn-outline btn-sm" data-forget="${esc(r.id)}" aria-label="Bhool jao">✕</button>
+    </div>`).join('') : empty('Abhi kuch nahi seekha.');
+  box.querySelectorAll('[data-forget]').forEach((b) => b.onclick = async () => {
+    try { await api(`/api/learned/${b.dataset.forget}`, { method: 'DELETE' }); toast('Naam hata diya'); loadItems(); }
+    catch (e) { toast(e.network ? 'Network nahi hai' : e.message); }
+  });
 }
 
 function renderParties() {

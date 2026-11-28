@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS parties (
     pos INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS learned (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_code TEXT NOT NULL,
+    words TEXT NOT NULL,          -- the spoken name the app learned for the item
+    source TEXT NOT NULL,         -- jodo (staff linked a line) | answer (staff picked it, then "haan pakka") | stt
+    order_id INTEGER,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -197,6 +205,7 @@ def reset_demo():
         c.execute("DELETE FROM orders")
         c.execute("DELETE FROM sqlite_sequence WHERE name='orders'")
         c.execute("DELETE FROM meta WHERE k='baseline_seconds'")
+        c.execute("DELETE FROM learned")
     replace_items([dict(i, aliases=list(i["aliases"])) for i in SAMPLE_ITEMS])
     replace_parties([dict(p, aliases=list(p["aliases"])) for p in SAMPLE_PARTIES])
 
@@ -293,3 +302,33 @@ def replace_parties(parties):
 def delete_item(code):
     with _conn() as c:
         return c.execute("DELETE FROM items WHERE code=?", (code,)).rowcount > 0
+
+
+# ------------------------------------------------------------- learned words
+def add_learned(item_code, words, source, order_id=None):
+    with _conn() as c:
+        c.execute("INSERT INTO learned (item_code, words, source, order_id, created_at) VALUES (?,?,?,?,?)",
+                  (item_code, words, source, order_id, datetime.now(IST).isoformat(timespec="seconds")))
+
+
+def list_learned():
+    """Every spoken name the app learned, newest first, with the item it points to now."""
+    with _conn() as c:
+        rows = c.execute("SELECT l.*, i.name AS item_name FROM learned l LEFT JOIN items i ON i.code = l.item_code "
+                         "ORDER BY l.id DESC").fetchall()
+        return [{"id": r["id"], "item_code": r["item_code"], "item_name": r["item_name"], "words": r["words"],
+                 "source": r["source"], "order_id": r["order_id"], "created_at": r["created_at"]} for r in rows]
+
+
+def delete_learned(learned_id):
+    """Forget a learned name: it leaves the item's spoken names too. Returns the row or None."""
+    with _conn() as c:
+        r = c.execute("SELECT * FROM learned WHERE id=?", (learned_id,)).fetchone()
+        if not r:
+            return None
+        c.execute("DELETE FROM learned WHERE id=?", (learned_id,))
+        it = c.execute("SELECT aliases FROM items WHERE code=?", (r["item_code"],)).fetchone()
+        if it:
+            aliases = [a for a in json.loads(it["aliases"]) if a != r["words"]]
+            c.execute("UPDATE items SET aliases=? WHERE code=?", (json.dumps(aliases), r["item_code"]))
+        return dict(r)

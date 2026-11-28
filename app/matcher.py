@@ -235,13 +235,21 @@ def choose_from(text: str, options, kind="item"):
     or a fresh name from the full catalog.
     """
     t = norm(text)
-    ordinals = {0: ["pehla", "pahla", "pehle", "first", "1", "ek", "one", "pela"],
-                1: ["dusra", "dusre", "second", "2", "do", "two"],
-                2: ["tisra", "tisre", "third", "3", "tin", "three"]}
+    # "pehla", "doosra", "second one": an ordinal. Plain numbers ("ek", "do", "2") count only in a
+    # short answer ("do", "number 2"): in "Lux de do" the "do" is the verb, and Lux is the answer.
+    ordinals = {0: ["pehla", "pahla", "pehle", "pehli", "first", "pela"],
+                1: ["dusra", "dusre", "dusri", "second"],
+                2: ["tisra", "tisre", "tisri", "third"]}
+    plain = {0: ["1", "ek", "one"], 1: ["2", "do", "two"], 2: ["3", "tin", "three"]}
     toks = t.split()
     for idx, words in ordinals.items():
         if idx < len(options) and any(norm(w) in toks for w in words):
             return options[idx]
+    short = [w for w in toks if w not in {"number", "nambar", "wala", "vala", "wali", "vali", "ji", "hai", "bhai"}]
+    if len(short) == 1:
+        for idx, words in plain.items():
+            if idx < len(options) and short[0] in {norm(w) for w in words}:
+                return options[idx]
     said = _sizes(toks)
     if kind == "item" and said:  # "1 inch wala" to "Astral Elbow 1\" ya Astral Elbow 2\"?"
         fits = [o for o in options if said <= _sizes(norm(o["name"]).split())]

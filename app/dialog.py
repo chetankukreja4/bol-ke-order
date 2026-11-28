@@ -327,6 +327,8 @@ def answer(d, text: str):
         if pick and pick["code"] not in ITEMS_BY_CODE:  # the item list changed while this order was open
             pick = None
         if pick and line:
+            if line["match"] in ("unsure", "unknown") and line.get("item_text"):
+                line["learn"] = line["item_text"]  # learned only if the order is then confirmed and saved
             line["item"], line["match"], line["options"] = item_option(pick["code"]), "ok", []
             line["unit"] = line["unit"] or ITEMS_BY_CODE[pick["code"]]["unit"]
             nums = stated_quantities(text)

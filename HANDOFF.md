@@ -23,6 +23,7 @@ What it does: staff speak the order in Hinglish, upload the customer's call reco
 | CI | GitHub Actions `tests` workflow: pytest, then `docker compose up --build` with no keys and a check of the main screen |
 | Local copy | `E:\scaler\bol-ke-order` |
 | Live URL | Not deployed yet. Host not chosen: `render.yaml` is ready; dostack.ai looked like an AI app builder rather than a Docker host (from its home page only, not confirmed). The rules say "You host it yourself". |
+| Code graph | `graphify-out/` (built with graphify 0.9.122 on 28 Nov): `graph.html` to explore, `GRAPH_REPORT.md` for hubs and clusters. Rebuild with `/graphify . --update`; the cache is git-ignored |
 | Round 1 research | `E:\scaler\Bharat_Ka_Hisaab_Research` |
 
 ## 3. Hackathon submission (deadline 30 Nov 2026, 11:59 pm, one submission per team)
@@ -178,6 +179,7 @@ Not checked yet:
 
 | Commit | What changed |
 |---|---|
+| code graph (branch `claude/project-thread-0fvxwz`) | Added `graphify-out/` (graph of all code and docs: 818 nodes, 43 clusters, no import cycles; hubs `build_draft`, `norm`, `answer`). Cache and local paths git-ignored. No app code changed |
 | docs (branch `docs-update-3`) | Section 3 now quotes the Round 2 brief (public repo, YouTube walkthrough, idea deck; deployed link optional); CI note covers #12 and its `main` run; section 11 no longer says Dostack (host not chosen) |
 | 95b9aab (#12, branch `docs-update-2`) | HANDOFF, README and DEPLOY brought up to date with `main` 7dab070 after #9-#11: day-1 progress, line counts, CI state, "an import replaces the whole list" (export all items in one file), missing brands, the "heard" line, the size question in the demo plan |
 | voice sizes (branch `fix/voice-sizes`) | Found in the browser check: the voice read `3/4"` as "teen slash chaar", `2x1''` as "do x ek", `1.5hp` as "ek dashamlav paanch", and dropped "inch". `tts.spoken_sizes` now says sizes the shop way (पौना / आधा / डेढ़ / सवा / ढाई / साढ़े, बाय, इंच, किलो, डिग्री for 45*); the quotes round heard words in "Pakka nahi hoon. '...' matlab" are not inch marks. Checked by sending the voice's mp3 back through Sarvam. 239 tests |

@@ -41,7 +41,7 @@ HINGLISH = {
     "nahi": "नहीं", "nahin": "नहीं", "pakka": "पक्का", "par": "पर", "parso": "परसों", "pehle": "पहले",
     "raha": "रहा", "saaf": "साफ़", "sa": "सा", "sahi": "सही", "samjha": "समझा", "se": "से", "sun": "सुन",
     "sune": "सुने", "theek": "ठीक", "wala": "वाला", "ya": "या", "ye": "ये", "zyada": "ज़्यादा",
-    "dal": "दाल", "sabun": "साबुन", "tel": "तेल",
+    "dal": "दाल", "sabun": "साबुन", "tel": "तेल", "tarikh": "तारीख",
 }
 
 _WORD = re.compile(r"[A-Za-z]+")

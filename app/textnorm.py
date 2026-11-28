@@ -237,16 +237,45 @@ _RAW_NUMBERS = {
     23: ["teis", "tais", "teyis"], 24: ["chaubis", "chobis", "chaubees"],
     25: ["pachees", "pachis", "pacchis", "pachchis", "pachchees"],
     26: ["chhabbis", "chabbis"], 27: ["sattais", "sataais"], 28: ["atthais", "athais"],
-    29: ["untis", "untees"], 30: ["tees", "thirty"], 35: ["paintis", "paintees"],
-    40: ["chalis", "chaalis", "forty"], 45: ["paintalis"], 50: ["pachas", "pachaas", "fifty"],
-    60: ["sixty"], 70: ["sattar", "seventy"], 75: ["pachattar"], 80: ["assi", "eighty"],
-    90: ["nabbe", "ninety"], 100: ["sau", "hundred"],
+    29: ["untis", "untees"], 30: ["tees", "thirty"], 31: ["iktis", "iktees", "ikatis"],
+    32: ["battis", "battees", "batis"], 33: ["taintis", "taintees", "tetis"], 34: ["chauntis", "chauntees", "chontis"],
+    35: ["paintis", "paintees"], 36: ["chhattis", "chhattees", "chattis"], 37: ["saintis", "saintees"],
+    38: ["adtis", "adtees", "artis", "artees"], 39: ["untalis", "unchalis"],
+    40: ["chalis", "chaalis", "forty"], 41: ["iktalis", "ikatalis"], 42: ["bayalis", "byalis"],
+    43: ["taintalis", "tetalis"], 44: ["chavalis", "chauvalis", "chawalis"], 45: ["paintalis"],
+    46: ["chhiyalis", "chiyalis"], 47: ["saintalis"], 48: ["adtalis", "artalis"], 49: ["unchas", "unchaas"],
+    50: ["pachas", "pachaas", "fifty"], 51: ["ikyavan", "ikyawan", "ikavan"], 52: ["bavan", "baawan", "bawan"],
+    53: ["tirpan", "tirepan"], 54: ["chauvan", "chauwan"], 55: ["pachpan"], 56: ["chhappan", "chappan"],
+    57: ["sattavan", "satavan"], 58: ["atthavan", "athavan", "athawan"], 59: ["unsath"],
+    # 60 "saath" is left out: it is also "with" ("ke saath")
+    60: ["sixty"], 61: ["iksath"], 62: ["basath", "baasath"], 63: ["tirsath", "tresath"],
+    64: ["chausath", "chaunsath"], 65: ["painsath"], 66: ["chhiyasath", "chiyasath"], 67: ["sadsath", "sarsath"],
+    68: ["adsath", "arsath"], 69: ["unhattar"], 70: ["sattar", "seventy"], 71: ["ikhattar", "ikahattar"],
+    72: ["bahattar"], 73: ["tihattar"], 74: ["chauhattar"], 75: ["pachattar", "pachhattar"],
+    76: ["chhihattar", "chihattar"], 77: ["sathattar", "satattar"], 78: ["athattar", "athahattar"], 79: ["unasi", "unyasi"],
+    80: ["assi", "eighty"], 81: ["ikyasi"], 82: ["bayasi"], 83: ["tirasi"], 84: ["chaurasi"], 85: ["pachasi"],
+    86: ["chhiyasi"], 87: ["sattasi"], 88: ["atthasi"], 89: ["navasi", "nawasi"], 90: ["nabbe", "ninety"],
+    91: ["ikyanve", "ikyanbe"], 92: ["banve", "baanve"], 93: ["tiranve"], 94: ["chauranve"], 95: ["pachanve"],
+    96: ["chhiyanve"], 97: ["sattanve"], 98: ["atthanve"], 99: ["ninyanve", "ninnyanve"], 100: ["sau", "hundred"],
 }
 WORD_TO_NUM = {}
 for _n, _words in _RAW_NUMBERS.items():
     for _w in _words:
         WORD_TO_NUM[norm(_w)] = _n
-FRACTIONS = {norm("dedh"): 1.5, norm("dhai"): 2.5, norm("dhaai"): 2.5, norm("aadha"): 0.5}
+# Devanagari keeps a short "a" inside a word: पचपन -> "pachapan", not "pachpan".
+# Number words of 20 and up also match with one such "a" added between consonants.
+_CONSONANT = set("bcdfghjklmnpqrstvwxyz")
+for _w, _n in list(WORD_TO_NUM.items()):
+    if isinstance(_n, int) and 20 < _n < 100 and _w.isalpha():
+        for _k in range(1, len(_w)):
+            if _w[_k - 1] in _CONSONANT and _w[_k] in _CONSONANT and _w[_k - 1:_k + 1] not in ("ch", "sh", "th", "dh", "kh", "gh", "bh", "ph", "jh"):
+                WORD_TO_NUM.setdefault(_w[:_k] + "a" + _w[_k:], _n)
+FRACTIONS = {norm("dedh"): 1.5, norm("derh"): 1.5, norm("dhai"): 2.5, norm("dhaai"): 2.5, norm("aadha"): 0.5}
+# "saadhe teen" = 3.5, "sawa sau" = 125, "paune do sau" = 175 (Devanagari साढ़े -> "sarhe")
+QTY_HALF = {"sadhe": 0.5, "sade": 0.5, "sarhe": 0.5, "sawa": 0.25, "sava": 0.25,
+            "paune": -0.25, "pauna": -0.25}  # already in norm() form ("saadhe" -> "sadhe")
+_HUNDRED = {norm("sau"), "hundred"}
+_THOUSAND = {norm(w) for w in ["hazaar", "hazar", "hajar", "hajaar", "thousand"]}
 # Number words that are also everyday words ("bhej do", "ek minute").
 WEAK_NUMBER_WORDS = {norm(w) for w in ["do", "ek", "tin", "sat", "che", "nau", "bis", "tera", "bara", "sola"]}
 
@@ -264,17 +293,45 @@ def parse_number_at(tokens, i):
             return FRACTIONS[tok]
         return WORD_TO_NUM.get(tok)
 
+    def tidy(x):
+        return int(x) if float(x).is_integer() else x
+
     if i >= len(tokens):
         return None, 0
+    if tokens[i] in QTY_HALF:
+        # "saadhe teen sau" = 350, "sawa sau" = 125: the fraction goes with the number
+        # after it, then sau / hazaar multiply. Without a number it is not a quantity.
+        half = QTY_HALF[tokens[i]]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if nxt in _HUNDRED | _THOUSAND and half > 0:  # "sawa sau", "sadhe hazaar" (= 1.25 / 1.5)
+            base, u = 1, 1
+        else:
+            base = single(nxt) if nxt else None
+            if not isinstance(base, int) or not 1 <= base < 100:
+                return None, 0
+            u = 2
+        val = base + half
+        if i + u < len(tokens) and tokens[i + u] in _HUNDRED:
+            return tidy(val * 100), u + 1
+        if i + u < len(tokens) and tokens[i + u] in _THOUSAND:
+            return tidy(val * 1000), u + 1
+        return tidy(val), u
     v = single(tokens[i])
     if v is None:
         return None, 0
     used = 1
-    # "do sau" -> 200, "ek sau bees" -> 120
-    if i + 1 < len(tokens) and tokens[i + 1] in (norm("sau"), "hundred") and v < 10:
-        v, used = v * 100, 2
+    # "do hazaar" -> 2000, "dedh hazaar" -> 1500, "do hazaar paanch sau" -> 2500
+    if i + 1 < len(tokens) and tokens[i + 1] in _THOUSAND and v < 100:
+        v, used = tidy(v * 1000), 2
         nxt, u2 = parse_number_at(tokens, i + 2)
-        if nxt is not None and nxt < 100:
+        if nxt is not None and nxt < 1000 and float(nxt).is_integer():
+            v, used = v + nxt, used + u2
+        return v, used
+    # "do sau" -> 200, "ek sau bees" -> 120, "dedh sau" -> 150
+    if i + 1 < len(tokens) and tokens[i + 1] in _HUNDRED and v < 10:
+        v, used = tidy(v * 100), 2
+        nxt, u2 = parse_number_at(tokens, i + 2)
+        if nxt is not None and nxt < 100 and float(nxt).is_integer():
             v, used = v + nxt, used + u2
         return v, used
     # "twenty five"

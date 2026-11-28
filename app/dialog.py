@@ -108,6 +108,10 @@ def next_question(d):
         if ln["match"] in ("unsure", "unknown", "missing"):
             names = ", ".join(_short(o["name"]) for o in ln["options"][:3])
             said = ln["item_text"] or "ye item"
+            if not names:  # nothing close to suggest (or no item was said): ask for the name
+                said = f"{_fmt_qty(ln['qty']) + ' ' if ln['qty'] is not None else ''}{ln['unit'] or ''}".strip()
+                text = f"{said} kya? Item ka naam bolein." if said else "Kaun sa item? Item ka naam bolein."
+                return {"type": "item", "line_id": ln["id"], "options": [], "text": text}
             return {"type": "item", "line_id": ln["id"], "options": ln["options"][:3],
                     "text": f"Pakka nahi hoon. '{said}' matlab {names}?"}
     for ln in d["lines"]:

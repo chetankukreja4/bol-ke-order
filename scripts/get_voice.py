@@ -7,6 +7,7 @@ Source: Hugging Face rhasspy/piper-voices (MIT licensed voices). Run once; the
 Docker image runs it at build time.
 """
 import os
+import socket
 import sys
 import urllib.request
 
@@ -15,6 +16,7 @@ BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/hi/hi_IN/pratha
 
 
 def main():
+    socket.setdefaulttimeout(60)  # a stalled download must not hang the Docker build
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "models")
     os.makedirs(out, exist_ok=True)
     for name in (f"{VOICE}.onnx", f"{VOICE}.onnx.json"):

@@ -6,10 +6,6 @@ from .parser import IST, today
 SOURCES = ("mic", "upload", "transcript", "typed")
 
 
-def now_iso():
-    return datetime.now(IST).isoformat(timespec="seconds")
-
-
 MAX_ELAPSED = 1800  # 30 min: anything longer is a tab left open, not order time
 
 

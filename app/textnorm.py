@@ -23,7 +23,54 @@ _VIRAMA = "्"
 _DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
 
+# English words as Hindi speech-to-text writes them (the browser's hi-IN gives "ट्वेंटी फाइव
+# पैकेट मैगी टुमारो"). Whole words only; read before letter-by-letter transliteration.
+_DEVA_ENGLISH = {}
+for _en, _forms in {
+    "one": "वन", "two": "टू", "three": "थ्री", "four": "फोर फ़ोर", "five": "फाइव फ़ाइव फाईव", "six": "सिक्स",
+    "seven": "सेवन", "eight": "एट", "nine": "नाइन", "ten": "टेन", "eleven": "इलेवन", "twelve": "ट्वेल्व",
+    "fifteen": "फिफ्टीन फ़िफ़्टीन", "twenty": "ट्वेंटी ट्वेन्टी", "thirty": "थर्टी", "forty": "फोर्टी फ़ोर्टी",
+    "fifty": "फिफ्टी फ़िफ़्टी", "sixty": "सिक्स्टी", "seventy": "सेवेंटी", "eighty": "एटी", "ninety": "नाइंटी",
+    "hundred": "हंड्रेड हन्ड्रेड", "thousand": "थाउजेंड थाउज़ेंड", "dozen": "डजन डज़न", "half": "हाफ",
+    "today": "टुडे", "tomorrow": "टुमारो टूमॉरो टुमॉरो टुमोरो", "day": "डे", "after": "आफ्टर",
+    "monday": "मंडे", "tuesday": "ट्यूसडे", "wednesday": "वेडनेसडे", "thursday": "थर्सडे", "friday": "फ्राइडे",
+    "saturday": "सैटरडे", "sunday": "संडे",
+    "traders": "ट्रेडर्स", "trader": "ट्रेडर", "stores": "स्टोर्स", "store": "स्टोर", "brothers": "ब्रदर्स",
+    "general": "जनरल", "new": "न्यू", "and": "एंड", "sorry": "सॉरी", "wait": "वेट", "second": "सेकंड",
+    "first": "फर्स्ट", "third": "थर्ड", "cancel": "कैंसिल कैंसल", "remove": "रिमूव", "delete": "डिलीट",
+    "confirm": "कंफर्म कन्फर्म", "done": "डन", "ok": "ओके", "okay": "ओके", "yes": "यस", "no": "नो",
+    "oil": "ऑयल ऑइल आयल", "soap": "सोप", "tea": "टी", "rice": "राइस", "salt": "सॉल्ट", "sugar": "शुगर",
+    "powder": "पाउडर", "toothpaste": "टूथपेस्ट टुथपेस्ट", "paste": "पेस्ट", "biscuit": "बिस्किट",
+    "noodles": "नूडल्स", "packet": "पैकेट", "box": "बॉक्स", "piece": "पीस", "pieces": "पीसेस",
+    "carton": "कार्टन", "litre": "लीटर", "kg": "केजी", "refined": "रिफाइंड", "excel": "एक्सेल",
+    "fortune": "फॉर्च्यून फार्च्यून", "colgate": "कोलगेट", "dettol": "डेटॉल डेटोल", "lifebuoy": "लाइफबॉय",
+    "surf": "सर्फ", "tide": "टाइड", "wheel": "व्हील", "maggi": "मैगी", "parle": "पारले",
+}.items():
+    for _f in _forms.split():
+        _DEVA_ENGLISH[_f] = _en
+_DEVA_WORD = re.compile(r"[\u0900-\u097F]+")
+
+
+def _schwa_deleted(chars, i):
+    """Hindi drops the short 'a' in the middle of a word: कोलगेट is "kolget", not "kolaget".
+    Rule: vowel before, then this consonant, then a consonant that carries a written vowel."""
+    if i == 0:
+        return False
+    prev = chars[i - 1]
+    first_syllable = prev in _CONS and (i == 1 or not ("ऀ" <= chars[i - 2] <= "ॿ"))  # सरसों: "sa" is a vowel too
+    if not (prev in _MATRAS or prev in _VOWELS or first_syllable):
+        return False
+    j = i + 1
+    if j < len(chars) and chars[j] in _CONS:
+        k = j + 1
+        if k < len(chars) and chars[k] == "़":
+            k += 1
+        return k < len(chars) and chars[k] in _MATRAS
+    return False
+
+
 def deva_to_roman(text: str) -> str:
+    text = _DEVA_WORD.sub(lambda m: _DEVA_ENGLISH.get(m.group(0), m.group(0)), text)
     out = []
     chars = list(text)
     i = 0
@@ -43,9 +90,10 @@ def deva_to_roman(text: str) -> str:
                 out.append(_MATRAS[nxt])
                 i += 2
                 continue
-            # inherent 'a', dropped at end of a word (schwa deletion)
+            # inherent 'a', dropped at end of a word and inside it before a voweled consonant
             if nxt and ("ऀ" <= nxt <= "ॿ") and nxt not in _SIGNS:
-                out.append("a")
+                if not _schwa_deleted(chars, i):
+                    out.append("a")
             elif nxt in _SIGNS:
                 out.append("a")
             i += 1
@@ -225,7 +273,7 @@ def readable(text: str) -> str:
 # ------------------------------------------------------------------- numbers
 _RAW_NUMBERS = {
     1: ["ek", "ik", "aik", "one"], 2: ["do", "doh", "two"], 3: ["teen", "tin", "three"],
-    4: ["char", "chaar", "four"], 5: ["paanch", "panch", "five"],
+    4: ["char", "chaar", "four"], 5: ["paanch", "panch", "panj", "punj", "five"],
     6: ["chhe", "che", "chhah", "chah", "chheh", "six"], 7: ["saat", "seven"],
     8: ["aath", "ath", "aat", "eight"], 9: ["nau", "nao", "nine"],
     10: ["das", "dus", "dass", "ten"], 11: ["gyarah", "gyara", "igyara", "eleven"],
@@ -270,7 +318,7 @@ for _w, _n in list(WORD_TO_NUM.items()):
         for _k in range(1, len(_w)):
             if _w[_k - 1] in _CONSONANT and _w[_k] in _CONSONANT and _w[_k - 1:_k + 1] not in ("ch", "sh", "th", "dh", "kh", "gh", "bh", "ph", "jh"):
                 WORD_TO_NUM.setdefault(_w[:_k] + "a" + _w[_k:], _n)
-FRACTIONS = {norm("dedh"): 1.5, norm("derh"): 1.5, norm("dhai"): 2.5, norm("dhaai"): 2.5, norm("aadha"): 0.5}
+FRACTIONS = {"half": 0.5, norm("dedh"): 1.5, norm("derh"): 1.5, norm("dhai"): 2.5, norm("dhaai"): 2.5, norm("aadha"): 0.5}
 # "saadhe teen" = 3.5, "sawa sau" = 125, "paune do sau" = 175 (Devanagari साढ़े -> "sarhe")
 QTY_HALF = {"sadhe": 0.5, "sade": 0.5, "sarhe": 0.5, "sawa": 0.25, "sava": 0.25,
             "paune": -0.25, "pauna": -0.25}  # already in norm() form ("saadhe" -> "sadhe")
@@ -278,6 +326,10 @@ _HUNDRED = {norm("sau"), "hundred"}
 _THOUSAND = {norm(w) for w in ["hazaar", "hazar", "hajar", "hajaar", "thousand"]}
 # Number words that are also everyday words ("bhej do", "ek minute").
 WEAK_NUMBER_WORDS = {norm(w) for w in ["do", "ek", "tin", "sat", "che", "nau", "bis", "tera", "bara", "sola"]}
+
+
+_ENGLISH_ONES = {norm(w) for w in ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]}
+_ENGLISH_TENS = {norm(w) for w in ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]}
 
 
 def parse_number_at(tokens, i):
@@ -334,11 +386,12 @@ def parse_number_at(tokens, i):
         if nxt is not None and nxt < 100 and float(nxt).is_integer():
             v, used = v + nxt, used + u2
         return v, used
-    # "twenty five"
+    # "twenty five", and the mixed "twenty paanch"
     if isinstance(v, int) and v in (20, 30, 40, 50, 60, 70, 80, 90) and i + 1 < len(tokens):
         nxt = single(tokens[i + 1])
-        if isinstance(nxt, int) and 1 <= nxt <= 9 and tokens[i + 1].isalpha() and tokens[i + 1] in {
-                norm(w) for w in ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]}:
+        english_tens = tokens[i] in _ENGLISH_TENS
+        if isinstance(nxt, int) and 1 <= nxt <= 9 and tokens[i + 1].isalpha() and (
+                tokens[i + 1] in _ENGLISH_ONES or english_tens):
             return v + nxt, 2
     return v, used
 

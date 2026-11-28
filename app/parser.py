@@ -20,7 +20,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 _UNIT_WORDS = {norm(w): u for u, ws in UNITS.items() for w in ws}
 _ALT_WORDS = {"ya", "or", "yaa", "-", "to", "se"}  # "10 se 12 carton" = 10 or 12: ask
-_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur\b| and | plus | phir | fir | uske baad | sath mein | saath mein ")
+_SPLIT_RE = re.compile(r"[,;!?\n।]|(?<!\d)\.(?!\d)| aur\b| and | plus | phir | fir | uske baad | sath mein | saath mein | te ")  # "te" = Punjabi "and"
 _BARGAIN = {norm(w) for w in ["rate", "rat", "bhav", "bhaav", "daam", "dam", "price", "discount",
                                "rupay", "rupaye", "rupee", "rs", "percent", "kam", "mehnga",
                                "mahanga", "sasta", "paisa", "paise", "udhaar", "udhar", "payment",
@@ -56,7 +56,7 @@ _ELSE_STARTS = [norm(w).split() for w in ["nahi toh", "nahi to", "nahin toh", "n
 _DAY_WORDS = {
     0: ["aaj", "aj", "today", "abhi", "turant"],
     1: ["kal", "tomorrow", "kl"],
-    2: ["parso", "parson", "parsoon", "parason", "parsom", "day after"],  # परसों -> "parason"
+    2: ["parso", "parson", "parsoon", "parason", "parsom", "day after", "day after tomorrow"],  # परसों -> "parason"
 }
 _WEEKDAYS = {0: ["somvar", "monday"], 1: ["mangalvar", "mangal", "tuesday"],
              2: ["budhvar", "budh", "wednesday"], 3: ["guruvar", "veervar", "thursday"],
@@ -73,6 +73,7 @@ _NOT_WORDS = {"nahi", "nahin", "nai", "na", "mat", "not", "no"}
 
 
 _TARIKH = {norm(w) for w in ["tarikh", "tareekh", "tarik", "tariq"]}  # not "date": that is also the fruit
+_ORDINAL = {"th", "nd", "rd"}  # "5th ko", "22nd tak" ("1st" is read as a pump stage, so not here)
 _MONTHS = {}
 for _m, _ws in enumerate([["january", "jan", "janvari", "janwari"], ["february", "feb", "farvari", "farwari"],
                           ["march"], ["april", "aprail"], [], ["june", "jun"], ["july", "julai"],
@@ -98,7 +99,7 @@ def _day_of_month(toks, i):
             return d, f"{v} {d.strftime('%b')}", used + 1
     except ValueError:  # "30 february"
         return None
-    if nxt in _TARIKH:
+    if nxt in _TARIKH or (nxt in _ORDINAL and toks[i].isdigit()):
         y, m = t.year, t.month
         if v < t.day:  # "3 tarikh" on the 28th = the 3rd of next month
             y, m = (y + 1, 1) if m == 12 else (y, m + 1)
@@ -146,7 +147,17 @@ def parse_date(text: str):
                     found.append((i, len(ww), today() + timedelta(days=ahead), words[0], w))
     for i, (d, label, used) in date_spans(toks):
         found.append((i, used, d, label, " ".join(toks[i:i + used])))
-    kept = [f for f in found if not (f[0] + f[1] < len(toks) and toks[f[0] + f[1]] in _NOT_WORDS)]
+    # "day after tomorrow": the long match wins over the "tomorrow" inside it
+    found = [f for f in found if not any(g[1] > f[1] and g[0] <= f[0] and f[0] + f[1] <= g[0] + g[1] for g in found)]
+
+    def dropped(f):  # "kal nahi parso": kal goes; "kal, nahi nahi 12" is about the quantity, kal stays
+        k = f[0] + f[1]
+        if k >= len(toks) or toks[k] not in _NOT_WORDS:
+            return False
+        while k < len(toks) and toks[k] in _NOT_WORDS:
+            k += 1
+        return k >= len(toks) or parse_number_at(toks, k)[0] is None
+    kept = [f for f in found if not dropped(f)]
     vague = {i for i in range(len(toks) - 1) if toks[i] in _KAL and toks[i + 1] in _PARSO}
     kept = [f for f in kept if f[0] not in vague and f[0] - 1 not in vague]  # "kal parso" = some day soon
     kept = [f for f in kept if f[4] not in _NOW or _SEND & set(toks[max(0, f[0] - 3):f[0] + 4])]
@@ -174,8 +185,9 @@ def _tokens(text, collapse=True):
     while collapse and i < len(toks):  # "10 carton nahi 12 carton Lux": only the second quantity counts
         q1 = _read_qty(toks, i)
         k = q1["end"] if q1 else -1
-        if q1 and len(q1["values"]) == 1 and k < len(toks) and toks[k] in _NOT_WORDS and _read_qty(toks, k + 1):
-            del toks[i:k + 1]
+        j = _fix_markers(toks, k) if q1 and k < len(toks) and toks[k] in _NOT_WORDS else k
+        if q1 and len(q1["values"]) == 1 and j > k and j < len(toks) and _read_qty(toks, j):
+            del toks[i:j]
             continue
         i += 1
     return toks  # norm already splits "10carton" and keeps sizes ("1inch") whole
@@ -187,7 +199,10 @@ def _is_qty_start(toks, i):
         return None, 0
     if toks[i] in WEAK_NUMBER_WORDS and used == 1:
         nxt = toks[i + 1] if i + 1 < len(toks) else ""
-        if nxt not in _UNIT_WORDS:  # "bhej do", "ek minute" are not quantities
+        v2, u2 = parse_number_at(toks, i + 1)
+        rng = isinstance(v, int) and isinstance(v2, int) and v < v2 <= 2 * v + 2 and u2 == 1 and nxt.isalpha() \
+            and i + 2 < len(toks) and toks[i + 2] in _UNIT_WORDS  # "teen chaar carton": 3 or 4
+        if nxt not in _UNIT_WORDS and not rng:  # "bhej do", "ek minute" are not quantities
             return None, 0
     return v, used
 
@@ -198,6 +213,12 @@ def _read_qty(toks, i):
     if v is None:
         return None
     vals, j = [v], i + used
+    # "dus bara carton", "paanch-chhe peti": two numbers side by side are a range: ask which
+    v2, u2 = parse_number_at(toks, j)
+    if v2 is not None and u2 == 1 and isinstance(v, int) and isinstance(v2, int) and v < v2 <= 2 * v + 2 \
+            and toks[j].isalpha() and toks[i].isalpha():
+        vals.append(v2)
+        j += 1
     while j + 1 < len(toks) and toks[j] in _ALT_WORDS:
         v2, u2 = parse_number_at(toks, j + 1)
         if v2 is None:
@@ -211,21 +232,64 @@ def _read_qty(toks, i):
     return {"values": vals, "unit": unit, "end": j}
 
 
+_FIX_WORDS = {norm(w) for w in ["sorry", "wait", "actually", "galti", "galat", "matlab", "sori"]}
+
+
+def _fix_markers(toks, k):
+    """Index after a run of correction words at k ("nahi nahi", "no wait", "sorry"), or k if none."""
+    j = k
+    while j < len(toks) and (toks[j] in _NOT_WORDS or toks[j] in _FIX_WORDS):
+        j += 1
+    return j
+
+
 def _inline_fix(toks):
-    """'10 nahi 12' / '10 carton nahi 12 carton' / 'nahi, 12' said right after a line:
-    the quantity of the line before changes. Returns the new quantity, or None."""
-    nots = [k for k, t in enumerate(toks) if t in _NOT_WORDS]
-    if len(nots) != 1:
+    """'10 nahi 12' / '10 carton nahi 12 carton' / 'nahi nahi, 12' / 'sorry 12 carton' /
+    'no wait, 12' said right after a line: the quantity of the line before changes.
+    Returns the new quantity, or None."""
+    k = next((n for n, t in enumerate(toks) if t in _NOT_WORDS or t in _FIX_WORDS), None)
+    if k is None:
         return None
-    k = nots[0]
     if k > 0:
         q1 = _read_qty(toks, 0)
         if not q1 or q1["end"] != k:
             return None
-    q2 = _read_qty(toks, k + 1)
+    j = _fix_markers(toks, k)
+    if j == len(toks):
+        return None
+    q2 = _read_qty(toks, j)
     if not q2 or q2["end"] != len(toks) or len(q2["values"]) != 1:
         return None
     return q2
+
+
+def _item_swap(toks, lines):
+    """'Lux nahi Dettol' / 'Lux nahi, Dettol' right after a Lux line: that line's item changes."""
+    k = next((n for n, t in enumerate(toks) if t in _NOT_WORDS), None)
+    if not k or not lines:
+        return None
+    old, new = _clean_item(toks[:k]), _clean_item(toks[_fix_markers(toks, k):])
+    if not old or not new or any(parse_number_at(toks, n)[0] is not None for n in range(len(toks))):
+        return None
+    was, now = match_item(" ".join(old)), match_item(" ".join(new))
+    prev = match_item(lines[-1]["item_text"])
+    if was["status"] == "ok" and now["status"] == "ok" and prev["item"] and prev["item"]["code"] == was["item"]["code"]:
+        return new
+    return None
+
+
+def stated_quantities(text: str):
+    """Quantities said along with an answer ("Lux, 12 carton", "Lux 12"): a number with a
+    unit, or in digits. "Lux de do" (the verb) and "second one" (which one) give none."""
+    toks, out, i = _tokens(text), [], 0
+    while i < len(toks):
+        q = _read_qty(toks, i)
+        if q and (q["unit"] or toks[i].isdigit()):
+            out += q["values"]
+            i = q["end"]
+        else:
+            i += 1
+    return out
 
 
 def _is_bargain(toks):
@@ -312,12 +376,29 @@ def extract_rules(text: str, call: bool = False):
     if two_parties:  # one order is for one party: ask, never merge them silently
         party_res = {"status": "choose", "party": None, "options": named}
         party_tokens = {t for p in named for t in norm(p["name"]).split()} | party_tokens
-    lines, last_item = [], None
+    lines, last_item, fix_next = [], None, False
     for clause in clauses:
         toks = _tokens(clause)
         if not toks:
             continue
-        fix = _inline_fix(_tokens(clause, collapse=False)) if lines else None
+        raw = _tokens(clause, collapse=False)
+        if raw and lines and _fix_markers(raw, 0) == len(raw):  # "no wait," / "nahi nahi," then the right quantity
+            fix_next = True
+            continue
+        if fix_next and lines:
+            fix_next = False
+            q = _read_qty(raw, 0)
+            if q and q["end"] == len(raw) and len(q["values"]) == 1:
+                lines[-1]["qty_values"] = q["values"]
+                lines[-1]["unit"] = q["unit"] or lines[-1]["unit"]
+                lines[-1]["heard"] += " / " + " ".join(raw)
+                continue
+        swap = _item_swap(raw, lines)
+        if swap:  # "10 carton Lux, Lux nahi Dettol": the line before is Dettol
+            lines[-1]["item_text"] = " ".join(swap)
+            lines[-1]["heard"] += " / " + " ".join(raw)
+            continue
+        fix = _inline_fix(raw) if lines else None
         if fix:  # "10 carton Lux, 10 nahi 12": the line before is 12, no new line
             lines[-1]["qty_values"] = fix["values"]
             lines[-1]["unit"] = fix["unit"] or lines[-1]["unit"]

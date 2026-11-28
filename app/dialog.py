@@ -8,7 +8,7 @@ import uuid
 
 from .catalog import ITEMS_BY_CODE, PARTIES, PARTIES_BY_CODE, UNITS
 from .matcher import choose_from, find_party, group_label, item_option, match_item, party_option
-from .parser import extract_rules, is_confirm, is_correction, is_leave_it, parse_date, quantities_in, today
+from .parser import extract_rules, is_confirm, is_correction, is_leave_it, parse_date, quantities_in, stated_quantities, today
 from .textnorm import norm, numbers_in, readable
 
 
@@ -200,6 +200,78 @@ def _apply_correction(d, text):
     return d, False
 
 
+_REMOVE_WORDS = {norm(w) for w in ["hata", "hatao", "hatado", "hatana", "remove", "delete", "cancel", "kainsal"]}
+_REMOVE_PHRASES = [norm(p).split() for p in ["nahi chahiye", "nahin chahiye", "mat bhejo", "mat bhejna", "mat dena",
+                                              "nikal do", "nikaal do", "kat do", "kaat do"]]
+_SWAP_PHRASES = [(norm(p).split(), False) for p in ["ki jagah", "ke jagah", "ki jageh", "ke badle", "ki badle",
+                                                     "ki bajaye", "ke bajaye", "ke bajay", "nahi", "nahin"]] + \
+                [(norm("instead of").split(), True)]
+_ADD_WORDS = {norm(w) for w in ["aur", "bhi", "add", "extra", "plus", "alag", "naya", "nayi", "ek aur"]}
+
+
+def _code_of(words):
+    from .parser import _clean_item
+    words = _clean_item(words)
+    m = match_item(" ".join(words)) if words else None
+    return m["item"]["code"] if m and m["status"] == "ok" else None
+
+
+def _find(toks, phrase):
+    return next((i for i in range(len(toks) - len(phrase) + 1) if toks[i:i + len(phrase)] == phrase), None)
+
+
+def _edit_by_name(d, text):
+    """Hinglish edits that name the item: "Lux ki jagah Dettol", "Surf hata do",
+    "Surf 8 kar do" / "sorry, 12 carton Lux". Returns True if the draft changed."""
+    toks = norm(text).split()
+    in_draft = {ln["item"]["code"] for ln in d["lines"] if ln["item"] and ln["match"] == "ok"}
+    for phrase, reverse in _SWAP_PHRASES:
+        k = _find(toks, phrase)
+        if k is None or k == 0:
+            continue
+        old, new = toks[:k], toks[k + len(phrase):]
+        if reverse:
+            old, new = new, old
+        a, b = _code_of(old), _code_of(new)
+        if a in in_draft and b and b != a and not quantities_in(text):
+            for ln in d["lines"]:
+                if ln["item"] and ln["item"]["code"] == a:
+                    ln["item"], ln["match"], ln["options"] = item_option(b), "ok", []
+                    ln["group"] = ITEMS_BY_CODE[b].get("group")
+                    if not ln.get("heard_unit"):
+                        ln["unit"] = ITEMS_BY_CODE[b]["unit"]
+                    _refresh_line(ln)
+                    d["last_line_id"] = ln["id"]
+            return True
+    rest, hit = list(toks), False
+    for phrase in _REMOVE_PHRASES:
+        k = _find(rest, phrase)
+        if k is not None:
+            del rest[k:k + len(phrase)]
+            hit = True
+    if any(t in _REMOVE_WORDS for t in rest):
+        rest, hit = [t for t in rest if t not in _REMOVE_WORDS], True
+    if hit and not quantities_in(text):
+        code = _code_of([t for t in rest if t not in ("do", "karo", "kar", "dijiye", "dena", "wala", "vala")])
+        if code in in_draft:
+            d["lines"] = [ln for ln in d["lines"] if not (ln["item"] and ln["item"]["code"] == code)]
+            return True
+    if _ADD_WORDS & set(toks):
+        return False
+    said = extract_rules(text)["lines"]
+    if len(said) == 1 and said[0]["qty_values"]:
+        code = match_item(said[0]["item_text"])["item"] if said[0]["item_text"] else None
+        code = code["code"] if code and match_item(said[0]["item_text"])["status"] == "ok" else None
+        targets = [ln for ln in d["lines"] if ln["item"] and ln["item"]["code"] == code]
+        if code in in_draft and len(targets) == 1:
+            _set_qty(targets[0], said[0]["qty_values"])
+            if said[0]["unit"]:
+                targets[0]["unit"] = said[0]["unit"]
+            d["last_line_id"] = targets[0]["id"]
+            return True
+    return False
+
+
 def _count(d, key):
     """Pilot numbers; drafts from an old browser tab have no stats."""
     if isinstance(d.get("stats"), dict):
@@ -226,6 +298,11 @@ def answer(d, text: str):
             return d, "confirm"
         d["say"] = f"Pehle ye batayein: {d['question']['text']}"
         return d, "repeat"
+    if _edit_by_name(d, text):  # "Surf 8 kar do", "Surf hata do", "Lux ki jagah Dettol"
+        _count(d, "corrections")
+        if not d["lines"]:
+            d["say"] = "Saari lines hat gayi. Order dobara bolein."
+        return finish(d), "updated"
     if is_correction(text) and parse_date(text) and not quantities_in(" ".join(norm(text).split()[1:])):
         d["delivery"] = parse_date(text)  # "nahi, parso": only the day changes
         _count(d, "corrections")
@@ -252,7 +329,7 @@ def answer(d, text: str):
         if pick and line:
             line["item"], line["match"], line["options"] = item_option(pick["code"]), "ok", []
             line["unit"] = line["unit"] or ITEMS_BY_CODE[pick["code"]]["unit"]
-            nums = numbers_in(text)
+            nums = stated_quantities(text)
             if nums:  # "Lux, 12 carton"
                 _set_qty(line, nums)
             _refresh_line(line)
